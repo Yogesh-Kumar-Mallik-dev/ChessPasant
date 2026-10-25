@@ -3,6 +3,20 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+fn create_engine_command<P: AsRef<std::ffi::OsStr>>(program: P) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        // 0x08000000 = CREATE_NO_WINDOW - Prevents flashing cmd console on Windows
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct NativeEngineInfo {
     pub available: bool,
@@ -81,7 +95,7 @@ pub fn find_stockfish() -> Option<PathBuf> {
     }
 
     // 4. Try PATH lookup
-    if let Ok(output) = Command::new("stockfish").arg("uci").output() {
+    if let Ok(output) = create_engine_command("stockfish").arg("uci").output() {
         if output.status.success() {
             return Some(PathBuf::from("stockfish"));
         }
@@ -112,7 +126,7 @@ pub fn native_engine_evaluate(fen: String, depth: u32) -> Result<NativeEvalResul
 
     let depth = depth.clamp(1, 30);
 
-    let mut child = Command::new(&binary)
+    let mut child = create_engine_command(&binary)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -194,6 +208,16 @@ pub fn native_engine_evaluate(fen: String, depth: u32) -> Result<NativeEvalResul
 
     let _ = child.kill();
 
+    // Stockfish UCI protocol evaluates relative to the side to move.
+    // Convert to White-centric perspective (positive = White leads, negative = Black leads).
+    let is_black = fen.split_whitespace().nth(1) == Some("b");
+    if is_black {
+        score_cp = -score_cp;
+        if is_mate {
+            mate_in = mate_in.map(|m| -m);
+        }
+    }
+
     // Standard Lichess win chance formula
     let win_chance = if is_mate {
         if mate_in.unwrap_or(0) > 0 {
@@ -226,7 +250,7 @@ pub fn native_engine_bot_move(fen: String, level: u32) -> Result<String, String>
     let skill_level = ((level.clamp(1, 10) - 1) * 2).clamp(0, 20);
     let depth = (level.clamp(1, 10) + 2).clamp(3, 15);
 
-    let mut child = Command::new(&binary)
+    let mut child = create_engine_command(&binary)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

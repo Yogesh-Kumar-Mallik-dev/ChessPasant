@@ -87,14 +87,8 @@ pub fn native_play_sound(name: String) {
 
         #[cfg(target_os = "windows")]
         {
-            // PowerShell media player command for Windows
-            let script = format!(
-                "(New-Object Media.SoundPlayer '{}').PlaySync()",
-                file_path.display()
-            );
-            let _ = Command::new("powershell")
-                .args(&["-NoProfile", "-Command", &script])
-                .status();
+            // Windows WebView2 natively handles audio playback via Web Audio API / HTML5 Audio
+            // Spawning powershell/cmd here creates intrusive console window flashes on Windows
         }
     });
 }

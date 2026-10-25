@@ -125,9 +125,11 @@ class ChessSoundPlayer {
 
 		const finalVol = Math.max(0, Math.min(1, volume * this.masterVolume));
 		const isMobileDevice = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+		const isLinuxDesktop = typeof navigator !== 'undefined' && /Linux/i.test(navigator.userAgent) && !isMobileDevice;
 
-		// 0. Native Desktop Audio: On desktop Tauri Linux/Windows/macOS, invoke native Rust audio (pw-play / system audio)
-		if (!isMobileDevice && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)) {
+		// 0. Native Desktop Audio: On desktop Tauri Linux (WebKitGTK without system gstreamer), invoke native Rust audio (pw-play/paplay)
+		// On Windows and macOS, Tauri WebView2/WebKit natively executes Web Audio API with zero subprocesses and zero popups
+		if (isLinuxDesktop && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)) {
 			import('@tauri-apps/api/core')
 				.then(({ invoke }) => {
 					invoke('native_play_sound', { name: key }).catch(() => {
@@ -140,7 +142,7 @@ class ChessSoundPlayer {
 			return;
 		}
 
-		// 1. Mobile & Web Standard: Direct Web Audio API / HTML5 Audio
+		// 1. Mobile, Windows, macOS & Web Standard: Direct Web Audio API / HTML5 Audio
 		this.playWebAudio(key, finalVol);
 	}
 

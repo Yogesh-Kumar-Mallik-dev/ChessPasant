@@ -331,7 +331,7 @@ func (r *MongoRepository) ListPendingChallenges(ctx context.Context, userID prim
 
 	outFilter := bson.M{
 		"challengerId": userID,
-		"status":       ChallengePending,
+		"status":       bson.M{"$in": []ChallengeStatus{ChallengePending, ChallengeAccepted}},
 		"createdAt":    bson.M{"$gte": cutoff},
 	}
 	outCur, err := r.challenges.Find(ctx, outFilter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))

@@ -9,15 +9,23 @@
 	let incomingChallenges: any[] = [];
 	let pollTimer: any = null;
 	let accepting = false;
+	let navigatingToGame = false;
 
 	async function checkChallenges() {
-		if (!$authStore.user) {
+		if (!$authStore.user || navigatingToGame) {
 			incomingChallenges = [];
 			return;
 		}
 		try {
 			const res = await api.challenges.list();
 			incomingChallenges = res.incoming || [];
+			if (res.outgoing && res.outgoing.length > 0) {
+				const accepted = res.outgoing.find((c: any) => c.status === 'accepted' && c.gameId);
+				if (accepted && !navigatingToGame) {
+					navigatingToGame = true;
+					goto(`/game/${accepted.gameId}`);
+				}
+			}
 		} catch (_) {}
 	}
 

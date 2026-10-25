@@ -60,9 +60,19 @@
 			try {
 				const list = await api.challenges.list();
 				// Check if challenge is accepted or gone
-				const ch = list.outgoing.find((c: any) => c.id === challengeId);
+				const ch = list.outgoing ? list.outgoing.find((c: any) => c.id === challengeId) : null;
 				if (!ch) {
-					// Challenge might be accepted, check active game or accepted status
+					// Fallback: check if an active game was already created for this match
+					try {
+						const active = await api.games.getActive();
+						if (active && active.id) {
+							clearInterval(pollInterval);
+							pollInterval = null;
+							isOpen = false;
+							goto(`/game/${active.id}`);
+							return;
+						}
+					} catch (_) {}
 					clearInterval(pollInterval);
 					pollInterval = null;
 				} else if (ch.status === 'accepted' && ch.gameId) {
