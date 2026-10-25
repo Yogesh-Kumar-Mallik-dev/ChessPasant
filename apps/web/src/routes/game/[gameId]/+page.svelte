@@ -690,7 +690,6 @@
 					turn={displayTurn}
 					playerColor={isPlayer && isLiveView ? myPlayerColor : null}
 					selectedSquare={isLiveView ? $gameStore.selectedSquare : null}
-					legalMoves={isLiveView ? $gameStore.legalMoves : []}
 					lastMove={displayLastMove}
 					isCheck={isLiveView ? $gameStore.isCheck : false}
 					interactive={isLiveView && isPlayer && $gameStore.status === 'playing'}
