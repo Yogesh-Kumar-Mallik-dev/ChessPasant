@@ -47,6 +47,7 @@ let engineWorker: Worker | null = null;
 let isWorkerReady = false;
 let currentResolve: ((res: EvaluationResult) => void) | null = null;
 let currentReject: ((err: Error) => void) | null = null;
+let currentEvaluatingFen = '';
 let evaluationTimeout: any = null;
 
 function isTauriEnvironment(): boolean {
@@ -360,20 +361,25 @@ function handleWorkerMessage(line: string) {
 		const bestMove = parts[1] || '';
 
 		if (currentResolve) {
-			const cp = lastInfoParsed.scoreCp;
+			// Stockfish UCI protocol evaluates relative to the side to move.
+			// Convert to White-centric perspective (positive = White leads, negative = Black leads).
+			const isBlackToMove = currentEvaluatingFen ? currentEvaluatingFen.split(' ')[1] === 'b' : false;
+			const effectiveScoreCp = isBlackToMove ? -lastInfoParsed.scoreCp : lastInfoParsed.scoreCp;
+			const effectiveMateIn = lastInfoParsed.mateIn !== undefined ? (isBlackToMove ? -lastInfoParsed.mateIn : lastInfoParsed.mateIn) : undefined;
+
 			let winChance = 50;
 			if (lastInfoParsed.isMate) {
-				winChance = (lastInfoParsed.mateIn || 0) > 0 ? 100 : 0;
+				winChance = (effectiveMateIn || 0) > 0 ? 100 : 0;
 			} else {
-				winChance = 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+				winChance = 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * effectiveScoreCp)) - 1);
 				winChance = Math.max(0, Math.min(100, winChance));
 			}
 
 			currentResolve({
-				fen: '',
-				scoreCp: lastInfoParsed.scoreCp,
+				fen: currentEvaluatingFen,
+				scoreCp: effectiveScoreCp,
 				isMate: lastInfoParsed.isMate,
-				mateIn: lastInfoParsed.mateIn,
+				mateIn: effectiveMateIn,
 				bestMove,
 				pv: lastInfoParsed.pv,
 				depth: lastInfoParsed.depth,
@@ -404,6 +410,7 @@ async function evaluateViaWorker(fen: string, depth = 12, movetimeMs?: number): 
 			currentReject(new Error('Evaluation cancelled for newer position'));
 		}
 
+		currentEvaluatingFen = fen;
 		currentResolve = resolve;
 		currentReject = reject;
 		lastInfoParsed = { depth: 0, scoreCp: 0, isMate: false, pv: [] };
@@ -530,7 +537,7 @@ export async function generateBotMove(
 	}
 
 	// 2. Try Browser Local Stockfish WASM
-	if (state.isCached && state.isEnabled) {
+	if (state.isEnabled && (state.isCached || typeof window !== 'undefined')) {
 		if (!engineWorker) startWorker();
 		const worker = engineWorker;
 		if (worker) {
@@ -582,24 +589,49 @@ export async function generateBotMove(
 					}
 				}
 			} catch (e) {
-				console.warn('[Engine] Local worker bot move failed, falling back to server:', e);
+				console.warn('[Engine] Local worker bot move failed, falling back to server/local-rules:', e);
 			}
 		}
 	}
 
-	// 3. Fallback to Cloud Server API
-	const res = await api.chess.botMove(fen, level);
-	return {
-		from: res.from,
-		to: res.to,
-		san: res.san,
-		newFen: res.newFen,
-		turn: res.turn,
-		isCapture: res.isCapture || false,
-		isPromotion: res.isPromotion || false,
-		valid: res.valid,
-		source: 'cloud'
-	};
+	// 3. Fallback to Cloud Server API with instant local rules fallback
+	try {
+		const res = await api.chess.botMove(fen, level);
+		return {
+			from: res.from,
+			to: res.to,
+			san: res.san,
+			newFen: res.newFen,
+			turn: res.turn,
+			isCapture: res.isCapture || false,
+			isPromotion: res.isPromotion || false,
+			valid: res.valid,
+			source: 'cloud'
+		};
+	} catch (e) {
+		console.warn('[Engine] Cloud botMove failed or offline, falling back to local chess rules:', e);
+		const { Chess } = await import('chess.js');
+		const c = new Chess(fen);
+		const moves = c.moves({ verbose: true });
+		if (moves.length === 0) {
+			throw new Error('Game over, no legal moves available');
+		}
+		// Prefer capture or check if available, else pick a random move
+		const tactical = moves.filter((m: any) => m.captured || m.san.includes('+'));
+		const chosen = tactical.length > 0 ? tactical[Math.floor(Math.random() * tactical.length)] : moves[Math.floor(Math.random() * moves.length)];
+		const m = c.move(chosen);
+		return {
+			from: m.from,
+			to: m.to,
+			san: m.san,
+			newFen: c.fen(),
+			turn: c.turn() === 'w' ? 'white' : 'black',
+			isCapture: !!m.captured,
+			isPromotion: !!m.promotion,
+			valid: true,
+			source: 'wasm'
+		};
+	}
 }
 
 /**

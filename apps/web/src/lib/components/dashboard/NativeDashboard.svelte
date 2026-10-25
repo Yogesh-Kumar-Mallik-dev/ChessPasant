@@ -53,6 +53,7 @@
 	let dailyStatusType: 'info' | 'success' | 'error' = 'info';
 	let dailySolutionIndex = 0;
 	let dailySolved = false;
+	let dailyAnimating = false;
 
 	// Interactive Free Play Board State
 	let heroChess = new Chess();
@@ -159,7 +160,7 @@
 
 	// Daily puzzle widget move handler
 	async function handleDailyMove(event: CustomEvent<{ from: string; to: string; promotion?: PieceType }>) {
-		if (!dailyPuzzle || dailySolved) return;
+		if (!dailyPuzzle || dailySolved || dailyAnimating) return;
 		const { from, to, promotion } = event.detail;
 
 		const uciMove = `${from}${to}${promotion || ''}`;
@@ -200,6 +201,7 @@
 				if (dailyPuzzle.solution && dailySolutionIndex < dailyPuzzle.solution.length) {
 					dailyStatusMessage = 'Best move! Opponent replying...';
 					dailyStatusType = 'info';
+					dailyAnimating = true;
 					const opponentUci = dailyPuzzle.solution[dailySolutionIndex];
 					const oppFrom = opponentUci.slice(0, 2);
 					const oppTo = opponentUci.slice(2, 4);
@@ -220,19 +222,44 @@
 							dailyStatusMessage = 'Your turn. Keep calculating!';
 							dailyStatusType = 'info';
 						}
+						dailyAnimating = false;
 					}, 380);
 				}
 			}
 		} else {
-			// Incorrect move
-			soundEffects.playIllegal();
-			dailyStatusMessage = 'That move is not optimal. Try again!';
-			dailyStatusType = 'error';
+			// Explicitly show player's attempted move on the board, then revert after displaying feedback
+			const wrongResult = executeMoveClient(dailyFen, from, to, promotion);
+			if (wrongResult && wrongResult.valid) {
+				const prevFen = dailyFen;
+				const prevTurn = dailyTurn;
+				const prevLastMove = dailyLastMove;
+
+				dailyFen = wrongResult.newFen;
+				dailyTurn = wrongResult.turn;
+				dailyLastMove = { from, to, san: wrongResult.san, isCapture: wrongResult.isCapture };
+				soundEffects.playIllegal();
+				dailyStatusMessage = `Incorrect: ${wrongResult.san} is not optimal. Retracting...`;
+				dailyStatusType = 'error';
+				dailyAnimating = true;
+
+				setTimeout(() => {
+					dailyFen = prevFen;
+					dailyTurn = prevTurn;
+					dailyLastMove = prevLastMove;
+					dailyStatusMessage = 'Not the best move. Try again!';
+					dailyAnimating = false;
+				}, 800);
+			} else {
+				soundEffects.playIllegal();
+				dailyStatusMessage = 'Illegal move. Try again!';
+				dailyStatusType = 'error';
+			}
 		}
 	}
 
 	function resetDailyPuzzle() {
 		if (!dailyPuzzle) return;
+		dailyAnimating = false;
 		dailyFen = dailyPuzzle.fen;
 		const parts = dailyPuzzle.fen.split(' ');
 		dailyTurn = parts[1] === 'w' ? 'white' : 'black';
