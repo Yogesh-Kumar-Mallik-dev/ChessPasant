@@ -40,8 +40,9 @@ jobs:
 
       - name: Install Linux Build Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get clean
+          sudo apt-get update -y
+          sudo apt-get install -y \
             clang \
             cmake \
             ninja-build \
@@ -104,10 +105,15 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Configure Android SDK in Flutter
+        run: |
+          echo "y" | flutter config --android-sdk "$ANDROID_HOME"
+          yes | flutter doctor --android-licenses || true
+          flutter doctor -v
+
       - name: Build Android Release Binaries
         working-directory: apps/app
         run: |
-          yes | flutter doctor --android-licenses || true
           flutter pub get
           flutter build apk --release
           flutter build appbundle --release
@@ -232,7 +238,7 @@ jobs:
     name: Publish Release Assets
     needs: [build-linux, build-android, build-windows, build-apple]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Checkout repository
@@ -240,6 +246,7 @@ jobs:
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: release-assets/
           merge-multiple: true
