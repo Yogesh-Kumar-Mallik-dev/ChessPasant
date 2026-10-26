@@ -58,7 +58,7 @@ jobs:
           flutter pub get
           flutter build linux --release
 
-      - name: Package Linux Standalone Bundle & Arch Package
+      - name: Package Linux Standalone Bundle & Arch & Debian Packages
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
@@ -67,6 +67,10 @@ jobs:
 
           echo "==> Creating standalone Linux tarball..."
           tar -czvf "dist/linux/ChessPasant_${VERSION}_linux_x64.tar.gz" -C apps/app/build/linux/x64/release/bundle .
+
+          echo "==> Packaging Debian/Ubuntu .deb package..."
+          chmod +x ./packaging/linux/package-deb.sh
+          ./packaging/linux/package-deb.sh "$VERSION" "$GITHUB_WORKSPACE/dist/linux"
 
           echo "==> Packaging Arch Linux .pkg.tar.zst..."
           chmod +x ./packaging/arch/package-arch.sh
@@ -77,6 +81,7 @@ jobs:
         with:
           name: chesspasant-linux-bundles
           path: |
+            dist/linux/*.deb
             dist/linux/*.tar.gz
             dist/arch/*.pkg.tar.zst
             dist/arch/*.tar.gz
@@ -165,6 +170,15 @@ jobs:
           flutter pub get
           flutter build windows --release
 
+      - name: Build Inno Setup Windows Installer
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.8}"
+          mkdir -p dist/windows
+          iscc packaging/windows/inno-setup.iss "/DAppVersion=${VERSION}"
+
       - name: Package Windows ZIP Bundle
         shell: bash
         run: |
@@ -205,13 +219,20 @@ jobs:
           flutter pub get
           flutter build macos --release
 
-      - name: Package macOS Application
+      - name: Package macOS Application (DMG & ZIP)
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
           VERSION="${VERSION:-0.1.8}"
           mkdir -p dist/macos
 
+          echo "==> Creating macOS Drag-and-Drop .dmg installer..."
+          hdiutil create -volname "ChessPasant" \
+            -srcfolder "apps/app/build/macos/Build/Products/Release/ChessPasant.app" \
+            -ov -format UDZO \
+            "dist/macos/ChessPasant_${VERSION}.dmg"
+
+          echo "==> Creating macOS portable zip..."
           ditto -c -k --sequesterRsrc --keepParent \
             apps/app/build/macos/Build/Products/Release/ChessPasant.app \
             "dist/macos/ChessPasant_${VERSION}_macos.zip"

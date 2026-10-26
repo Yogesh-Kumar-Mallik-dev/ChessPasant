@@ -4,18 +4,20 @@ Welcome to the official cross-platform release of **ChessPasant v0.1.8** — a m
 
 ---
 
-### 📦 Official Download Packages
+### 📦 Official Single-File Installers & Packages
 
-| Platform | Package | Architecture | Format / Target |
+| Platform | Installer / Package | Type | Target / Installation |
 | :--- | :--- | :--- | :--- |
-| <img src="https://raw.githubusercontent.com/Yogesh-Kumar-Mallik-dev/ChessPasant/main/apps/web/static/icons/archlinux.svg" width="16" height="16" valign="middle" /> **Arch Linux** | `chesspasant-0.1.8-1-x86_64.pkg.tar.zst` | x86_64 | Pacman (`sudo pacman -U`) |
-| <img src="https://raw.githubusercontent.com/Yogesh-Kumar-Mallik-dev/ChessPasant/main/apps/web/static/icons/archlinux.svg" width="16" height="16" valign="middle" /> **Arch Linux / AUR** | `ChessPasant_0.1.8_x86_64.tar.gz` | x86_64 | Standalone / AUR `makepkg` |
-| <img src="https://raw.githubusercontent.com/Yogesh-Kumar-Mallik-dev/ChessPasant/main/apps/web/static/icons/tux.svg" width="16" height="16" valign="middle" /> **Linux (Universal)** | `ChessPasant_0.1.8_linux_x64.tar.gz` | x86_64 | Portable Standalone Bundle |
-| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/android.svg" width="16" height="16" valign="middle" /> **Android (Universal)** | `ChessPasant_0.1.8.apk` | Universal (arm64, armv7, x86_64) | Sideload / Install on Android 5.0+ |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/windows11.svg" width="16" height="16" valign="middle" /> **Windows** | `ChessPasant_0.1.8_x64_Setup.exe` | **Single-File Setup Installer** | Standard Windows Setup Wizard (Desktop & Start Menu shortcuts) |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/windows11.svg" width="16" height="16" valign="middle" /> **Windows (Portable)** | `ChessPasant_0.1.8_windows_x64.zip` | Portable Archive | Extract and run `chesspasant.exe` (No installation needed) |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="16" height="16" valign="middle" /> **macOS** | `ChessPasant_0.1.8.dmg` | **Single-File Disk Image** | Drag-and-Drop into `/Applications` |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="16" height="16" valign="middle" /> **macOS (Portable)** | `ChessPasant_0.1.8_macos.zip` | Compressed Bundle | Unzip and run `ChessPasant.app` |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/ubuntu.svg" width="16" height="16" valign="middle" /> **Debian / Ubuntu** | `chesspasant_0.1.8_amd64.deb` | **Single-File Debian Package** | Double-click or `sudo dpkg -i` |
+| <img src="https://raw.githubusercontent.com/Yogesh-Kumar-Mallik-dev/ChessPasant/main/apps/web/static/icons/archlinux.svg" width="16" height="16" valign="middle" /> **Arch Linux** | `chesspasant-0.1.8-1-x86_64.pkg.tar.zst` | Pacman Package | Pacman (`sudo pacman -U`) |
+| <img src="https://raw.githubusercontent.com/Yogesh-Kumar-Mallik-dev/ChessPasant/main/apps/web/static/icons/tux.svg" width="16" height="16" valign="middle" /> **Linux (Universal)** | `ChessPasant_0.1.8_linux_x64.tar.gz` | Standalone Tarball | Portable Linux Bundle |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/android.svg" width="16" height="16" valign="middle" /> **Android (Universal)** | `ChessPasant_0.1.8.apk` | **Single-File APK** | Sideload / Install on Android 5.0+ |
 | <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/googleplay.svg" width="16" height="16" valign="middle" /> **Android (Google Play)** | `ChessPasant_0.1.8.aab` | Universal Bundle | Play Console Publishing |
-| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/windows11.svg" width="16" height="16" valign="middle" /> **Windows (x64)** | `ChessPasant_0.1.8_windows_x64.zip` | x64 | Native `chesspasant.exe` Bundle |
-| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="16" height="16" valign="middle" /> **macOS** | `ChessPasant_0.1.8_macos.zip` | Universal / Apple Silicon & Intel | Native `ChessPasant.app` Bundle |
-| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="16" height="16" valign="middle" /> **iOS** | `ChessPasant_0.1.8_ios_unsigned.ipa` | arm64 | Sideload via AltStore, SideStore, TrollStore |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="16" height="16" valign="middle" /> **iOS** | `ChessPasant_0.1.8_ios_unsigned.ipa` | Sideload IPA | Sideload via AltStore, SideStore, TrollStore |
 
 ---
 
@@ -43,9 +45,10 @@ Welcome to the official cross-platform release of **ChessPasant v0.1.8** — a m
 
 ### 💻 Installation Notes
 
-- **Arch Linux**: Run `sudo pacman -U chesspasant-0.1.8-1-x86_64.pkg.tar.zst` or extract `ChessPasant_0.1.8_x86_64.tar.gz` and run `./chesspasant`.
-- **Linux Standalone**: Extract `ChessPasant_0.1.8_linux_x64.tar.gz` and execute `./chesspasant`.
+- **Windows**: Download `ChessPasant_0.1.8_x64_Setup.exe` and follow the setup wizard. (Or use the portable ZIP).
+- **macOS**: Open `ChessPasant_0.1.8.dmg` and drag `ChessPasant` into `Applications`. (On first launch, right-click and select **Open** to approve Gatekeeper).
+- **Debian / Ubuntu**: Double-click `chesspasant_0.1.8_amd64.deb` to install via your software center (or run `sudo dpkg -i chesspasant_0.1.8_amd64.deb`).
+- **Arch Linux**: Run `sudo pacman -U chesspasant-0.1.8-1-x86_64.pkg.tar.zst`.
+- **Linux Standalone**: Extract `ChessPasant_0.1.8_linux_x64.tar.gz` and run `./chesspasant`.
 - **Android**: Download `ChessPasant_0.1.8.apk` and tap to install (enable "Install unknown apps" if prompted).
-- **Windows**: Unzip `ChessPasant_0.1.8_windows_x64.zip` and run `chesspasant.exe`.
-- **macOS**: Unzip `ChessPasant_0.1.8_macos.zip` and move `ChessPasant.app` to your `/Applications` directory. (On first launch, right-click and select **Open** to approve Gatekeeper).
 - **iOS**: Sideload `ChessPasant_0.1.8_ios_unsigned.ipa` using AltStore, SideStore, or TrollStore.
