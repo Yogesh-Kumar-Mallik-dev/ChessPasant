@@ -19,6 +19,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 # Locate compiled binary
 BINARY_PATH=""
 CANDIDATE_PATHS=(
+    "$ROOT_DIR/apps/app/build/linux/x64/release/bundle/chesspasant"
     "$ROOT_DIR/apps/desktop/src-tauri/target/release/chesspasant"
     "$ROOT_DIR/apps/desktop/src-tauri/target/release/ChessPasant"
     "$ROOT_DIR/apps/desktop/src-tauri/target/debug/chesspasant"
@@ -44,12 +45,18 @@ fi
 
 # If force rebuild or binary not found, build via desktop release
 if [ "${FORCE_REBUILD:-0}" = "1" ] || [ -z "$BINARY_PATH" ] || [ ! -f "$BINARY_PATH" ]; then
-    echo "==> [arch] Building desktop via npm/cargo..."
-    cd "$ROOT_DIR/apps/desktop"
-    npm run build -- --no-bundle
-    BINARY_PATH="$ROOT_DIR/apps/desktop/src-tauri/target/release/chesspasant"
-    if [ ! -f "$BINARY_PATH" ]; then
-        BINARY_PATH="$ROOT_DIR/apps/desktop/src-tauri/target/release/ChessPasant"
+    if [ -d "$ROOT_DIR/apps/app" ]; then
+        echo "==> [arch] Building Flutter native release bundle..."
+        "$ROOT_DIR/scripts/app.sh" build
+        BINARY_PATH="$ROOT_DIR/apps/app/build/linux/x64/release/bundle/chesspasant"
+    else
+        echo "==> [arch] Building desktop via npm/cargo..."
+        cd "$ROOT_DIR/apps/desktop"
+        npm run build -- --no-bundle
+        BINARY_PATH="$ROOT_DIR/apps/desktop/src-tauri/target/release/chesspasant"
+        if [ ! -f "$BINARY_PATH" ]; then
+            BINARY_PATH="$ROOT_DIR/apps/desktop/src-tauri/target/release/ChessPasant"
+        fi
     fi
 fi
 
@@ -67,9 +74,21 @@ mkdir -p "$PKG_DIR/usr/share/icons/hicolor/512x512/apps"
 mkdir -p "$PKG_DIR/usr/share/icons/hicolor/128x128/apps"
 mkdir -p "$PKG_DIR/usr/share/icons/hicolor/32x32/apps"
 
-# 1. Install binary
-cp "$BINARY_PATH" "$PKG_DIR/usr/bin/chesspasant"
-chmod 755 "$PKG_DIR/usr/bin/chesspasant"
+# 1. Install binary / Flutter bundle
+if [ -d "$(dirname "$BINARY_PATH")/data" ]; then
+    echo "==> [arch] Installing Flutter release bundle to /usr/lib/chesspasant..."
+    mkdir -p "$PKG_DIR/usr/lib/chesspasant"
+    cp -r "$(dirname "$BINARY_PATH")"/* "$PKG_DIR/usr/lib/chesspasant/"
+    chmod 755 "$PKG_DIR/usr/lib/chesspasant/chesspasant"
+    cat << 'EOF' > "$PKG_DIR/usr/bin/chesspasant"
+#!/bin/sh
+exec /usr/lib/chesspasant/chesspasant "$@"
+EOF
+    chmod 755 "$PKG_DIR/usr/bin/chesspasant"
+else
+    cp "$BINARY_PATH" "$PKG_DIR/usr/bin/chesspasant"
+    chmod 755 "$PKG_DIR/usr/bin/chesspasant"
+fi
 
 # 1b. Install bundled Stockfish 19 NNUE engine
 mkdir -p "$PKG_DIR/usr/lib/chesspasant"
@@ -113,11 +132,16 @@ packager = Yogesh Kumar Mallik <yogeshkumarmallikdev@gmail.com>
 size = ${INSTALLED_SIZE}
 arch = x86_64
 license = MIT
-depend = webkit2gtk-4.1
 depend = gtk3
 depend = glib2
 depend = openssl
-depend = libayatana-appindicator
+EOF
+
+if [ ! -d "$(dirname "$BINARY_PATH")/data" ]; then
+    echo "depend = webkit2gtk-4.1" >> "$PKG_DIR/.PKGINFO"
+fi
+
+cat <<EOF >> "$PKG_DIR/.PKGINFO"
 optdepend = stockfish: external UCI engine analysis
 provides = chesspasant
 conflict = chesspasant

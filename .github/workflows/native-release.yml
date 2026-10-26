@@ -1,0 +1,285 @@
+name: Native Multiplatform Release (Linux, Android, Windows, macOS, iOS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach binaries to (e.g. v0.1.7)'
+        required: true
+        type: string
+        default: 'v0.1.7'
+      release_draft:
+        description: 'Publish as Draft Release'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================================================
+  # 1. Linux Native Binary (ELF 64-bit + Arch Linux PKG)
+  # ============================================================================
+  build-linux:
+    name: Build Linux Native (x64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Linux Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            zstd
+
+      - name: Build Flutter Linux Release
+        working-directory: apps/app
+        run: |
+          flutter pub get
+          flutter build linux --release
+
+      - name: Package Linux Standalone Bundle & Arch Package
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.7}"
+          mkdir -p dist/linux dist/arch
+
+          echo "==> Creating standalone Linux tarball..."
+          tar -czvf "dist/linux/ChessPasant_${VERSION}_linux_x64.tar.gz" -C apps/app/build/linux/x64/release/bundle .
+
+          echo "==> Packaging Arch Linux .pkg.tar.zst..."
+          chmod +x ./packaging/arch/package-arch.sh
+          ./packaging/arch/package-arch.sh "$VERSION" "$GITHUB_WORKSPACE/dist/arch"
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chesspasant-linux-bundles
+          path: |
+            dist/linux/*.tar.gz
+            dist/arch/*.pkg.tar.zst
+            dist/arch/*.tar.gz
+
+  # ============================================================================
+  # 2. Android APK & Google Play App Bundle (AAB)
+  # ============================================================================
+  build-android:
+    name: Build Android (APK & AAB)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Build Android Release Binaries
+        working-directory: apps/app
+        run: |
+          flutter pub get
+          flutter build apk --release
+          flutter build appbundle --release
+
+      - name: Prepare Android Artifacts
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.7}"
+          mkdir -p dist/android
+
+          cp apps/app/build/app/outputs/flutter-apk/app-release.apk "dist/android/ChessPasant_${VERSION}.apk"
+          cp apps/app/build/app/outputs/bundle/release/app-release.aab "dist/android/ChessPasant_${VERSION}.aab"
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chesspasant-android-bundles
+          path: dist/android/*
+
+  # ============================================================================
+  # 3. Windows Native Executable & Portable Bundle
+  # ============================================================================
+  build-windows:
+    name: Build Windows Native (x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Build Windows Release
+        working-directory: apps/app
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Package Windows ZIP Bundle
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.7}"
+          mkdir -p dist/windows
+
+          cd apps/app/build/windows/x64/runner/Release
+          7z a -tzip "$GITHUB_WORKSPACE/dist/windows/ChessPasant_${VERSION}_windows_x64.zip" *
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chesspasant-windows-bundles
+          path: dist/windows/*
+
+  # ============================================================================
+  # 4. Apple macOS & iOS Native Builds
+  # ============================================================================
+  build-apple:
+    name: Build macOS & iOS Native
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Build macOS Release
+        working-directory: apps/app
+        run: |
+          flutter pub get
+          flutter build macos --release
+
+      - name: Package macOS Application
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.7}"
+          mkdir -p dist/macos
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            apps/app/build/macos/Build/Products/Release/ChessPasant.app \
+            "dist/macos/ChessPasant_${VERSION}_macos.zip"
+
+      - name: Build iOS Release (Unsigned IPA)
+        working-directory: apps/app
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Package iOS IPA
+        run: |
+          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${RAW_TAG#v}"
+          VERSION="${VERSION:-0.1.7}"
+          mkdir -p dist/ios /tmp/Payload
+
+          cp -r apps/app/build/ios/iphoneos/Runner.app /tmp/Payload/
+          (cd /tmp && zip -r "$GITHUB_WORKSPACE/dist/ios/ChessPasant_${VERSION}_ios_unsigned.ipa" Payload)
+
+      - name: Upload Apple Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chesspasant-apple-bundles
+          path: |
+            dist/macos/*
+            dist/ios/*
+
+  # ============================================================================
+  # 5. Aggregate & Publish to GitHub Releases
+  # ============================================================================
+  publish-release:
+    name: Publish Release Assets
+    needs: [build-linux, build-android, build-windows, build-apple]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Inspect Release Assets
+        run: |
+          echo "==> Gathered release assets:"
+          ls -lh release-assets/
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: 'ChessPasant ${{ github.event.inputs.tag || github.ref_name }} (True Native Release)'
+          draft: ${{ github.event.inputs.release_draft == 'true' || false }}
+          prerelease: false
+          body: |
+            # ♟ ChessPasant True Native Multiplatform Release
+
+            Enjoy the authentic acoustic chess experience powered by **Flutter 3.47** & **Dart 3.13** compiling down to native machine code with GPU hardware acceleration and zero webview overhead.
+
+            ### 📦 Platform Downloads
+            - **Linux (x64)**:
+              - Standalone archive: `ChessPasant_*_linux_x64.tar.gz` (Extract and run `./chesspasant`)
+              - Arch Linux package: `chesspasant-*-x86_64.pkg.tar.zst` (`sudo pacman -U <file>`)
+            - **Windows (x64)**:
+              - Portable ZIP: `ChessPasant_*_windows_x64.zip` (Extract and run `chesspasant.exe`)
+            - **macOS (Universal / Apple Silicon)**:
+              - App archive: `ChessPasant_*_macos.zip` (Unzip and move to `/Applications`)
+            - **Android**:
+              - Universal APK: `ChessPasant_*.apk` (Sideload / Install on any Android 5.0+ device)
+              - Play Store Bundle: `ChessPasant_*.aab`
+            - **iOS**:
+              - Sideload IPA: `ChessPasant_*_ios_unsigned.ipa` (Install via AltStore, SideStore, or TrollStore)
+
+            ---
+            *Built automatically by the GitHub Actions Native Release pipeline.*
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.pkg.tar.zst
+            release-assets/*.zip
+            release-assets/*.apk
+            release-assets/*.aab
+            release-assets/*.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
