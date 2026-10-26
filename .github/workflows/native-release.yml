@@ -26,7 +26,7 @@ jobs:
   # ============================================================================
   build-linux:
     name: Build Linux Native (x64)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -40,7 +40,7 @@ jobs:
 
       - name: Install Linux Build Dependencies
         run: |
-          sudo apt-get clean
+          sudo add-apt-repository universe -y
           sudo apt-get update -y
           sudo apt-get install -y \
             clang \
@@ -115,8 +115,8 @@ jobs:
         working-directory: apps/app
         run: |
           flutter pub get
-          flutter build apk --release
-          flutter build appbundle --release
+          flutter build apk --release --verbose
+          flutter build appbundle --release --verbose
 
       - name: Prepare Android Artifacts
         run: |
@@ -251,10 +251,12 @@ jobs:
           path: release-assets/
           merge-multiple: true
 
-      - name: Inspect Release Assets
+      - name: Flatten Release Assets
         run: |
+          mkdir -p final-assets
+          find release-assets/ -type f -exec cp {} final-assets/ \;
           echo "==> Gathered release assets:"
-          ls -lh release-assets/
+          ls -lh final-assets/
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -264,12 +266,6 @@ jobs:
           draft: ${{ github.event.inputs.release_draft == 'true' || false }}
           prerelease: false
           body_path: .github/release-notes.md
-          files: |
-            release-assets/*.tar.gz
-            release-assets/*.pkg.tar.zst
-            release-assets/*.zip
-            release-assets/*.apk
-            release-assets/*.aab
-            release-assets/*.ipa
+          files: final-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
