@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher, onMount } from 'svelte';
 	import { Chess } from 'chess.js';
-	import { api } from '$lib/api/client';
 	import {
 		fenToBoard,
 		squareName,
@@ -27,7 +26,6 @@
 	export let turn: Color = 'white';
 	export let playerColor: Color | null = null;
 	export let selectedSquare: string | null = null;
-	export let legalMoves: string[] = [];
 	export let lastMove: { from: string; to: string; san?: string; isCapture?: boolean; isPromotion?: boolean } | null = null;
 	export let isCheck: boolean = false;
 	export let interactive = true;
@@ -80,36 +78,11 @@
 
 	$: board = fenToBoard(fen);
 
-	let serverLegalTargets: LegalTarget[] = [];
-	let lastReqKey = '';
-	$: if (selectedSquare && fen) {
-		const key = `${fen}:${selectedSquare}`;
-		if (key !== lastReqKey) {
-			lastReqKey = key;
-			api.chess.legalMoves(fen, selectedSquare).then((res) => {
-				serverLegalTargets = res.targets.map((t) => ({
-					from: selectedSquare!,
-					to: t.to,
-					category: (t.category as any) || (t.isCapture ? 'capture' : 'normal'),
-					isCapture: t.isCapture,
-					isEnPassant: t.category === 'en_passant',
-					isCastle: t.category === 'castle',
-					isPromotion: false,
-					san: t.san
-				}));
-			}).catch(() => {
-				serverLegalTargets = getLegalMovesForSquare(fen, selectedSquare!);
-			});
-		}
-	} else {
-		serverLegalTargets = [];
-		lastReqKey = '';
-	}
-
-	// Compute legal moves authoritatively from backend server
-	$: legalTargets = selectedSquare ? (serverLegalTargets.length > 0 ? serverLegalTargets : getLegalMovesForSquare(fen, selectedSquare)) : [];
+	// Authoritative synchronous legal move generation using client chess engine.
+	// Completely eliminates network race conditions, stale target retention, and visual move desyncs.
+	$: legalTargets = selectedSquare ? getLegalMovesForSquare(fen, selectedSquare) : [];
 	$: legalTargetMap = new Map<string, LegalTarget>(legalTargets.map((t) => [t.to, t]));
-	$: legalTargetSquares = new Set([...legalTargets.map((t) => t.to), ...legalMoves]);
+	$: legalTargetSquares = new Set(legalTargets.map((t) => t.to));
 	$: legalCaptureSquares = new Set(legalTargets.filter((t) => t.isCapture).map((t) => t.to));
 
 	// Engine state evaluation for game termination & check detection

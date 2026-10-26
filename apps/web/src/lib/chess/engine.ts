@@ -105,6 +105,9 @@ export const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -
  * Returns all legal destination squares for a given square in the position.
  */
 export function getLegalMovesForSquare(fen: string, square: string): LegalTarget[] {
+	if (!square || !/^[a-h][1-8]$/.test(square)) {
+		return [];
+	}
 	try {
 		const chess = new Chess(fen);
 		const moves = chess.moves({ square: square as Square, verbose: true });

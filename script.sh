@@ -29,6 +29,7 @@ function show_help() {
   echo "  desktop-arch  Package ChessPasant for Arch Linux (.pkg.tar.zst & .tar.gz)"
   echo "  desktop-deploy-arch Deploy Arch Linux repository to production VPS"
   echo "  mobile   Manage, check, and build ChessPasant Tauri mobile (Android/iOS)"
+  echo "  app      Run, build, or test the native Flutter cross-platform app"
   echo "  engine   Launch standalone Stockfish 19 engine microservice (port 8081)"
   echo "  flush    Flush database (MongoDB) and Redis caches"
   echo "  help     Display this help message"
@@ -137,6 +138,14 @@ case "$COMMAND" in
       exec "$SCRIPT_DIR/scripts/mobile.sh" "$@"
     else
       echo "scripts/mobile.sh not found"
+      exit 1
+    fi
+    ;;
+  app)
+    if [ -f "$SCRIPT_DIR/scripts/app.sh" ]; then
+      exec "$SCRIPT_DIR/scripts/app.sh" "$@"
+    else
+      echo "scripts/app.sh not found"
       exit 1
     fi
     ;;
