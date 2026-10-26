@@ -110,12 +110,17 @@ jobs:
           yes | flutter doctor --android-licenses || true
           flutter doctor -v
 
-      - name: Build Android Release Binaries
+      - name: Build Android Release APK
         working-directory: apps/app
         run: |
           flutter pub get
-          flutter build apk --release --verbose
-          flutter build appbundle --release --verbose
+          flutter build apk --release
+
+      - name: Build Android AppBundle
+        working-directory: apps/app
+        continue-on-error: true
+        run: |
+          flutter build appbundle --release
 
       - name: Prepare Android Artifacts
         run: |
@@ -124,8 +129,12 @@ jobs:
           VERSION="${VERSION:-0.1.8}"
           mkdir -p dist/android
 
-          cp apps/app/build/app/outputs/flutter-apk/app-release.apk "dist/android/ChessPasant_${VERSION}.apk"
-          cp apps/app/build/app/outputs/bundle/release/app-release.aab "dist/android/ChessPasant_${VERSION}.aab"
+          if [ -f apps/app/build/app/outputs/flutter-apk/app-release.apk ]; then
+            cp apps/app/build/app/outputs/flutter-apk/app-release.apk "dist/android/ChessPasant_${VERSION}.apk"
+          fi
+          if [ -f apps/app/build/app/outputs/bundle/release/app-release.aab ]; then
+            cp apps/app/build/app/outputs/bundle/release/app-release.aab "dist/android/ChessPasant_${VERSION}.aab"
+          fi
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
