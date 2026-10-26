@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to attach binaries to (e.g. v0.1.7)'
+        description: 'Release tag to attach binaries to (e.g. v0.1.8)'
         required: true
         type: string
-        default: 'v0.1.7'
+        default: 'v0.1.8'
       release_draft:
         description: 'Publish as Draft Release'
         required: true

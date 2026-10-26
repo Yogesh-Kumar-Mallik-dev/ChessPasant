@@ -1,12 +1,12 @@
 # Maintainer: Yogesh Kumar Mallik <yogeshkumarmallikdev@gmail.com>
 pkgname=chesspasant-bin
-pkgver=0.1.4
+pkgver=0.1.8
 pkgrel=1
 pkgdesc="Modern, distraction-free chess platform and Stockfish 19 Game Review Studio"
 arch=('x86_64')
 url="https://github.com/Yogesh-Kumar-Mallik-dev/ChessPasant"
 license=('MIT')
-depends=('webkit2gtk-4.1' 'gtk3' 'glib2' 'openssl' 'libayatana-appindicator')
+depends=('gtk3' 'glib2' 'openssl')
 optdepends=('stockfish: for external UCI system engine calculation')
 provides=('chesspasant')
 conflicts=('chesspasant')
