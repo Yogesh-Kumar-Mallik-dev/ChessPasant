@@ -111,8 +111,14 @@ jobs:
 
       - name: Configure Android SDK in Flutter
         run: |
-          echo "y" | flutter config --android-sdk "$ANDROID_HOME"
+          flutter config --android-sdk "$ANDROID_HOME"
           yes | flutter doctor --android-licenses || true
+          FLUTTER_DIR=$(dirname $(dirname $(which flutter)))
+          mkdir -p apps/app/android
+          cat << EOF > apps/app/android/local.properties
+sdk.dir=$ANDROID_HOME
+flutter.sdk=${FLUTTER_ROOT:-$FLUTTER_DIR}
+EOF
           flutter doctor -v
 
       - name: Build Android Release APK
@@ -171,24 +177,26 @@ jobs:
           flutter build windows --release
 
       - name: Build Inno Setup Windows Installer
-        shell: bash
+        shell: pwsh
         run: |
-          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
-          mkdir -p dist/windows
-          iscc packaging/windows/inno-setup.iss "/DAppVersion=${VERSION}"
+          $rawTag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $version = $rawTag -replace '^v',''
+          if (-not $version) { $version = "0.1.8" }
+          New-Item -ItemType Directory -Force -Path dist/windows
+          $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue)?.Source
+          if (-not $iscc) {
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc packaging/windows/inno-setup.iss "/DAppVersion=$version"
 
       - name: Package Windows ZIP Bundle
-        shell: bash
+        shell: pwsh
         run: |
-          RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
-          mkdir -p dist/windows
-
-          cd apps/app/build/windows/x64/runner/Release
-          7z a -tzip "$GITHUB_WORKSPACE/dist/windows/ChessPasant_${VERSION}_windows_x64.zip" *
+          $rawTag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $version = $rawTag -replace '^v',''
+          if (-not $version) { $version = "0.1.8" }
+          New-Item -ItemType Directory -Force -Path dist/windows
+          Compress-Archive -Path apps/app/build/windows/x64/runner/Release/* -DestinationPath "dist/windows/ChessPasant_${version}_windows_x64.zip" -Force
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4

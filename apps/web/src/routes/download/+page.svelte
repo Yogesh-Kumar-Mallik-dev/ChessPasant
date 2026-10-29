@@ -8,8 +8,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 
 	const GITHUB_REPO = 'https://github.com/Yogesh-Kumar-Mallik-dev/ChessPasant';
-	let releaseTag = 'v0.1.7';
-	let versionNum = '0.1.7';
+	let releaseTag = 'v0.1.8';
+	let versionNum = '0.1.8';
 	const RELEASES_PAGE = `${GITHUB_REPO}/releases`;
 
 	// Download artifacts map - dynamically updated from GitHub Releases API
@@ -20,7 +20,7 @@
 		},
 		ios: {
 			pwa: 'https://chess.yogeshmallik.in',
-			ipa: `${GITHUB_REPO}/releases`
+			ipa: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_ios_unsigned.ipa`
 		},
 		arch: {
 			pkg: `${GITHUB_REPO}/releases/download/${releaseTag}/chesspasant-${versionNum}-1-x86_64.pkg.tar.zst`,
@@ -28,15 +28,16 @@
 			pkgbuild: `${GITHUB_REPO}/blob/main/packaging/arch/PKGBUILD`
 		},
 		linux: {
-			appimage: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_amd64.AppImage`,
+			universal: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_linux_x64.tar.gz`,
 			deb: `${GITHUB_REPO}/releases/download/${releaseTag}/chesspasant_${versionNum}_amd64.deb`
 		},
 		windows: {
-			exe: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_x64-setup.exe`,
-			msi: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_x64_en-US.msi`
+			exe: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_x64_Setup.exe`,
+			zip: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_windows_x64.zip`
 		},
 		macos: {
-			dmg: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_universal.dmg`
+			dmg: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}.dmg`,
+			zip: `${GITHUB_REPO}/releases/download/${releaseTag}/ChessPasant_${versionNum}_macos.zip`
 		}
 	};
 
@@ -71,25 +72,27 @@
 						const findAsset = (pattern: RegExp) =>
 							data.assets.find((a: any) => pattern.test(a.name))?.browser_download_url;
 
-						const apk = findAsset(/\.apk$/);
-						const ipa = findAsset(/\.ipa$/);
-						const pkg = findAsset(/\.pkg\.tar\.zst$/);
-						const tarball = findAsset(/\.tar\.gz$/);
-						const appimage = findAsset(/\.AppImage$/);
-						const deb = findAsset(/\.deb$/);
-						const exe = findAsset(/setup\.exe$/);
-						const msi = findAsset(/\.msi$/);
-						const dmg = findAsset(/\.dmg$/);
+						const apk = findAsset(/\.apk$/i);
+						const ipa = findAsset(/\.ipa$/i);
+						const pkg = findAsset(/\.pkg\.tar\.zst$/i);
+						const archTarball = findAsset(/x86_64.*\.tar\.gz$/i);
+						const linuxTarball = findAsset(/linux.*\.tar\.gz$/i);
+						const deb = findAsset(/\.deb$/i);
+						const exe = findAsset(/_Setup\.exe$|setup\.exe$/i);
+						const winZip = findAsset(/windows.*\.zip$/i);
+						const dmg = findAsset(/\.dmg$/i);
+						const macZip = findAsset(/macos.*\.zip$/i);
 
 						if (apk) downloads.android.apk = apk;
 						if (ipa) downloads.ios.ipa = ipa;
 						if (pkg) downloads.arch.pkg = pkg;
-						if (tarball) downloads.arch.tarball = tarball;
-						if (appimage) downloads.linux.appimage = appimage;
+						if (archTarball) downloads.arch.tarball = archTarball;
+						if (linuxTarball) downloads.linux.universal = linuxTarball;
 						if (deb) downloads.linux.deb = deb;
 						if (exe) downloads.windows.exe = exe;
-						if (msi) downloads.windows.msi = msi;
+						if (winZip) downloads.windows.zip = winZip;
 						if (dmg) downloads.macos.dmg = dmg;
+						if (macZip) downloads.macos.zip = macZip;
 						downloads = { ...downloads };
 					}
 				}
@@ -238,8 +241,8 @@
 				</a>
 				<a href={downloads.ios.ipa} target="_blank" rel="noopener noreferrer" class="block">
 					<Button variant="outline" size="sm" className="w-full justify-between text-xs">
-						<span>View Releases & IPA</span>
-						<Icon name="external-link" size={13} />
+						<span>Download Sideload .ipa</span>
+						<Icon name="download" size={13} />
 					</Button>
 				</a>
 			</div>
@@ -322,25 +325,25 @@
 					<div class="w-12 h-12 rounded-xl bg-secondary border border-border/80 flex items-center justify-center text-foreground font-bold shadow-2xs">
 						<Icon name="brand-linux" size={24} className="text-foreground" />
 					</div>
-					<span class="text-xs font-mono text-muted-foreground">amd64</span>
+					<span class="text-xs font-mono text-muted-foreground">amd64 / x86_64</span>
 				</div>
 
-				<h2 class="text-lg font-bold text-foreground mb-1">Linux Universal</h2>
+				<h2 class="text-lg font-bold text-foreground mb-1">Linux (Debian / Universal)</h2>
 				<p class="text-xs text-muted-foreground mb-4">
-					Zero-install portable AppImage and Debian/Ubuntu packages for Fedora, Debian, Ubuntu, and Linux Mint.
+					Single-file .deb package for Debian, Ubuntu, and Linux Mint, plus standalone portable .tar.gz bundle.
 				</p>
 			</div>
 
 			<div class="space-y-2 pt-4 border-t border-border">
-				<a href={downloads.linux.appimage} class="block">
+				<a href={downloads.linux.deb} class="block">
 					<Button variant={detectedOs === 'linux' ? 'primary' : 'secondary'} size="sm" className="w-full justify-between text-xs">
-						<span>Download .AppImage</span>
+						<span>Download .deb Package</span>
 						<Icon name="download" size={13} />
 					</Button>
 				</a>
-				<a href={downloads.linux.deb} class="block">
+				<a href={downloads.linux.universal} class="block">
 					<Button variant="outline" size="sm" className="w-full justify-between text-xs">
-						<span>Download .deb Package</span>
+						<span>Download .tar.gz Bundle</span>
 						<Icon name="download" size={13} />
 					</Button>
 				</a>
@@ -367,7 +370,7 @@
 
 				<h2 class="text-lg font-bold text-foreground mb-1">Windows</h2>
 				<p class="text-xs text-muted-foreground mb-4">
-					Standard installer executable (.exe) and enterprise MSI package optimized for Windows 10 and Windows 11.
+					Single-file Setup Wizard (.exe) with desktop and Start Menu shortcuts, or portable ZIP archive.
 				</p>
 			</div>
 
@@ -378,9 +381,9 @@
 						<Icon name="download" size={13} />
 					</Button>
 				</a>
-				<a href={downloads.windows.msi} class="block">
+				<a href={downloads.windows.zip} class="block">
 					<Button variant="outline" size="sm" className="w-full justify-between text-xs">
-						<span>Download .msi Package</span>
+						<span>Download Portable .zip</span>
 						<Icon name="download" size={13} />
 					</Button>
 				</a>
@@ -402,25 +405,28 @@
 					<div class="w-12 h-12 rounded-xl bg-secondary border border-border/80 flex items-center justify-center text-foreground font-bold shadow-2xs">
 						<Icon name="brand-apple" size={24} className="text-foreground" />
 					</div>
-					<span class="text-xs font-mono text-muted-foreground">Universal</span>
+					<span class="text-xs font-mono text-muted-foreground">Universal / Apple Silicon</span>
 				</div>
 
 				<h2 class="text-lg font-bold text-foreground mb-1">macOS</h2>
 				<p class="text-xs text-muted-foreground mb-4">
-					Universal DMG disk image natively optimized for both Apple Silicon (M1/M2/M3/M4) and Intel Macs.
+					Single-file Drag-and-Drop .dmg disk image installer and portable ZIP archive for Apple Silicon and Intel Macs.
 				</p>
 			</div>
 
 			<div class="space-y-2 pt-4 border-t border-border">
 				<a href={downloads.macos.dmg} class="block">
 					<Button variant={detectedOs === 'macos' ? 'primary' : 'secondary'} size="sm" className="w-full justify-between text-xs">
-						<span>Download .dmg</span>
+						<span>Download .dmg Installer</span>
 						<Icon name="download" size={13} />
 					</Button>
 				</a>
-				<div class="text-[11px] text-center text-muted-foreground pt-1 font-mono">
-					macOS 11 Big Sur or newer
-				</div>
+				<a href={downloads.macos.zip} class="block">
+					<Button variant="outline" size="sm" className="w-full justify-between text-xs">
+						<span>Download Portable .zip</span>
+						<Icon name="download" size={13} />
+					</Button>
+				</a>
 			</div>
 		</Card>
 	</div>
