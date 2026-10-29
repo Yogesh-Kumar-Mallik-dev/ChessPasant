@@ -115,10 +115,8 @@ jobs:
           yes | flutter doctor --android-licenses || true
           FLUTTER_DIR=$(dirname $(dirname $(which flutter)))
           mkdir -p apps/app/android
-          cat << EOF > apps/app/android/local.properties
-sdk.dir=$ANDROID_HOME
-flutter.sdk=${FLUTTER_ROOT:-$FLUTTER_DIR}
-EOF
+          echo "sdk.dir=$ANDROID_HOME" > apps/app/android/local.properties
+          echo "flutter.sdk=${FLUTTER_ROOT:-$FLUTTER_DIR}" >> apps/app/android/local.properties
           flutter doctor -v
 
       - name: Build Android Release APK

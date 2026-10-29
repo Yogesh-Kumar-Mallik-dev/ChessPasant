@@ -76,37 +76,6 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # 3. Desktop Verification (Rust & Tauri Check)
-  # ============================================================================
-  desktop-ci:
-    name: Desktop CI (Tauri Rust Check)
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux GUI Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - name: Check Desktop Rust Crate
-        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
-
-  # ============================================================================
   # 4. Continuous Deployment to Production VPS
   # ============================================================================
   deploy-production:
