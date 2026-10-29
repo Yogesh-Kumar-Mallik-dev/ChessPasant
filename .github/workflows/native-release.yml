@@ -123,7 +123,7 @@ jobs:
         working-directory: apps/app
         run: |
           flutter pub get
-          flutter build apk --release
+          flutter build apk --release --verbose
 
       - name: Build Android AppBundle
         working-directory: apps/app
