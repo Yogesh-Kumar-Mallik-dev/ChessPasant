@@ -82,6 +82,12 @@ class AppIcon extends StatelessWidget {
         return '<polyline points="9 18 15 12 9 6" />';
       case 'chevron-left':
         return '<polyline points="15 18 9 12 15 6" />';
+      case 'chevrons-right':
+        return '<polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" />';
+      case 'chevrons-left':
+        return '<polyline points="11 17 6 12 11 7" /><polyline points="18 17 13 12 18 7" />';
+      case 'log-out':
+        return '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />';
       case 'check':
         return '<polyline points="20 6 9 17 4 12" />';
       case 'x':

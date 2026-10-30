@@ -8,8 +8,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 
 	const GITHUB_REPO = 'https://github.com/Yogesh-Kumar-Mallik-dev/ChessPasant';
-	let releaseTag = 'v0.1.9';
-	let versionNum = '0.1.9';
+	let releaseTag = 'v0.2.0';
+	let versionNum = '0.2.0';
 	const RELEASES_PAGE = `${GITHUB_REPO}/releases`;
 
 	// Download artifacts map - dynamically updated from GitHub Releases API

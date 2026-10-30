@@ -26,7 +26,7 @@ class NavigationDock extends StatelessWidget {
     NavigationDockItem(icon: 'zap', label: 'Online'),
     NavigationDockItem(icon: 'puzzle', label: 'Puzzles'),
     NavigationDockItem(icon: 'search', label: 'Analysis'),
-    NavigationDockItem(icon: 'trophy', label: 'Rankings'),
+    NavigationDockItem(icon: 'user', label: 'Profile'),
   ];
 
   @override

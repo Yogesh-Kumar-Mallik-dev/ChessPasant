@@ -1,6 +1,6 @@
 # Maintainer: Yogesh Kumar Mallik <yogeshkumarmallikdev@gmail.com>
 pkgname=chesspasant-bin
-pkgver=0.1.9
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Modern, distraction-free chess platform and Stockfish 19 Game Review Studio"
 arch=('x86_64')

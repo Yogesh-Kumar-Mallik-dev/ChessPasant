@@ -47,6 +47,7 @@ class ApiClient {
     }
   }
 
+  String? get authToken => _authToken;
   bool get isAuthenticated => _authToken != null && _authToken!.isNotEmpty;
 
   // Authentication
@@ -55,27 +56,69 @@ class ApiClient {
       'username': username,
       'password': password,
     });
-    if (res.data['token'] != null) {
-      await setAuthToken(res.data['token']);
+    final token = res.data['tokens']?['accessToken'] ??
+        res.data['token'] ??
+        res.data['accessToken'];
+    if (token != null) {
+      await setAuthToken(token.toString());
     }
     return res.data;
   }
 
-  Future<Map<String, dynamic>> register(String username, String email, String password) async {
+  Future<Map<String, dynamic>> register(
+      String username, String email, String password) async {
     final res = await _dio.post('/auth/register', data: {
       'username': username,
       'email': email,
       'password': password,
     });
-    if (res.data['token'] != null) {
-      await setAuthToken(res.data['token']);
+    final token = res.data['tokens']?['accessToken'] ??
+        res.data['token'] ??
+        res.data['accessToken'];
+    if (token != null) {
+      await setAuthToken(token.toString());
     }
     return res.data;
   }
 
-  Future<Map<String, dynamic>> getMe() async {
-    final res = await _dio.get('/auth/me');
-    return res.data;
+  Future<void> logout() async {
+    try {
+      await _dio.post('/auth/logout');
+    } catch (_) {}
+    await setAuthToken(null);
+  }
+
+  Future<Map<String, dynamic>?> getMe() async {
+    try {
+      final res = await _dio.get('/users/me');
+      return res.data;
+    } catch (_) {
+      try {
+        final res = await _dio.get('/auth/me');
+        return res.data;
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> getUserProfile(String username) async {
+    try {
+      final res = await _dio.get('/users/$username');
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Leaderboard
+  Future<List<dynamic>> getLeaderboard(String category) async {
+    try {
+      final res = await _dio.get('/leaderboard', queryParameters: {'category': category});
+      return res.data is List ? res.data : [];
+    } catch (_) {
+      return [];
+    }
   }
 
   // Games
@@ -93,9 +136,55 @@ class ApiClient {
     return res.data;
   }
 
-  Future<List<dynamic>> listGames({int limit = 10}) async {
-    final res = await _dio.get('/games', queryParameters: {'limit': limit});
-    return res.data is List ? res.data : [];
+  Future<List<dynamic>> listGames({String? userId, int limit = 10}) async {
+    final query = <String, dynamic>{'limit': limit};
+    if (userId != null) query['userId'] = userId;
+    try {
+      final res = await _dio.get('/games', queryParameters: query);
+      return res.data is List ? res.data : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // Matchmaking
+  Future<Map<String, dynamic>> joinMatchmaking({
+    required int initial,
+    required int increment,
+  }) async {
+    final res = await _dio.post('/matchmaking/join', data: {
+      'initial': initial,
+      'increment': increment,
+    });
+    return res.data;
+  }
+
+  Future<void> leaveMatchmaking() async {
+    try {
+      await _dio.post('/matchmaking/leave');
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>?> getMatchmakingStatus() async {
+    try {
+      final res = await _dio.get('/matchmaking/status');
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Analysis & Engine
+  Future<Map<String, dynamic>?> evaluatePosition(String fen, {int depth = 12}) async {
+    try {
+      final res = await _dio.post('/analysis/evaluate', data: {
+        'fen': fen,
+        'depth': depth,
+      });
+      return res.data;
+    } catch (_) {
+      return null;
+    }
   }
 
   // Puzzles
