@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'audio/sounds.dart';
 import 'api/api_client.dart';
 import 'screens/home_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,18 +20,7 @@ class ChessPasantApp extends StatelessWidget {
       title: 'ChessPasant',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.dark,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF141518),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF69884A),
-          brightness: Brightness.dark,
-          surface: const Color(0xFF1E2024),
-          primary: const Color(0xFF69884A),
-        ),
-        fontFamily: 'Roboto',
-      ),
+      theme: buildAppTheme(),
       home: const HomeScreen(),
     );
   }

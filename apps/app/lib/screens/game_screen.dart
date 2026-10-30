@@ -4,6 +4,8 @@ import '../chess/models.dart';
 import '../chess/engine.dart';
 import '../audio/sounds.dart';
 import '../widgets/chess_board.dart';
+import '../widgets/app_icon.dart';
+import '../theme/app_theme.dart';
 import '../websocket/game_socket.dart';
 
 class GameScreen extends StatefulWidget {
@@ -37,8 +39,6 @@ class _GameScreenState extends State<GameScreen> {
   Timer? _clockTimer;
 
   bool _isGameOver = false;
-  String _gameOverTitle = '';
-  String _gameOverSubtitle = '';
 
   @override
   void initState() {
@@ -79,7 +79,8 @@ class _GameScreenState extends State<GameScreen> {
     if (type == 'state' || type == 'init') {
       final fen = msg['fen'] as String? ?? initialFen;
       final turnStr = msg['turn'] as String? ?? 'w';
-      final turn = turnStr == 'w' || turnStr == 'white' ? PieceColor.white : PieceColor.black;
+      final turn =
+          turnStr == 'w' || turnStr == 'white' ? PieceColor.white : PieceColor.black;
 
       final white = msg['white'] as Map<String, dynamic>?;
       final black = msg['black'] as Map<String, dynamic>?;
@@ -96,54 +97,92 @@ class _GameScreenState extends State<GameScreen> {
         _playerColor = myColor;
         _whitePlayer = white;
         _blackPlayer = black;
-        if (msg['whiteTime'] != null) _whiteTimeMs = (msg['whiteTime'] as num).toInt();
-        if (msg['blackTime'] != null) _blackTimeMs = (msg['blackTime'] as num).toInt();
+        if (msg['whiteTime'] != null) {
+          _whiteTimeMs = (msg['whiteTime'] as num).toInt();
+        }
+        if (msg['blackTime'] != null) {
+          _blackTimeMs = (msg['blackTime'] as num).toInt();
+        }
       });
     } else if (type == 'move') {
-      final fen = msg['fen'] as String?;
+      final from = msg['from'] as String;
+      final to = msg['to'] as String;
+      final promo = msg['promotion'] as String?;
+      final fen = msg['fen'] as String;
+      final turnStr = msg['turn'] as String;
+      final turn =
+          turnStr == 'w' || turnStr == 'white' ? PieceColor.white : PieceColor.black;
       final san = msg['san'] as String? ?? '';
-      final moveObj = msg['move'] as Map<String, dynamic>?;
-      final turnStr = msg['turn'] as String? ?? 'w';
-      final turn = turnStr == 'w' || turnStr == 'white' ? PieceColor.white : PieceColor.black;
-      final isCap = san.contains('x');
-      final isCheck = msg['isCheck'] == true;
+      final isCap = msg['isCapture'] as bool? ?? false;
+      final isCheck = msg['isCheck'] as bool? ?? false;
 
       SoundEffects().playMoveSound(san: san, isCapture: isCap, isCheck: isCheck);
 
       setState(() {
-        if (fen != null) _fen = fen;
+        _fen = fen;
         _turn = turn;
-        if (moveObj != null) {
-          _lastMove = LastMoveInfo(
-            from: moveObj['from'] ?? '',
-            to: moveObj['to'] ?? '',
-            san: san,
-            isCapture: isCap,
-          );
+        _lastMove =
+            LastMoveInfo(from: from, to: to, san: san, isCapture: isCap, isPromotion: promo != null);
+        if (msg['whiteTime'] != null) {
+          _whiteTimeMs = (msg['whiteTime'] as num).toInt();
         }
-        if (msg['whiteTime'] != null) _whiteTimeMs = (msg['whiteTime'] as num).toInt();
-        if (msg['blackTime'] != null) _blackTimeMs = (msg['blackTime'] as num).toInt();
+        if (msg['blackTime'] != null) {
+          _blackTimeMs = (msg['blackTime'] as num).toInt();
+        }
       });
     } else if (type == 'game_over') {
       SoundEffects().playGameEnd();
-      final title = msg['winner'] != null ? '${msg['winner']} Won!' : 'Game Drawn';
-      final subtitle = msg['outcome'] ?? msg['result'] ?? 'Match Finished';
+      final winner = msg['winner'] as String?;
+      final reason = msg['reason'] as String? ?? 'Match concluded';
+      final title = winner == null
+          ? 'Drawn Game'
+          : (winner == (_playerColor == PieceColor.white ? 'white' : 'black')
+              ? 'Victory!'
+              : 'Defeat');
+
       setState(() {
         _isGameOver = true;
-        _gameOverTitle = title;
-        _gameOverSubtitle = subtitle;
       });
+      _clockTimer?.cancel();
 
       showDialog(
         context: context,
+        barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1E2024),
-          title: Text(_gameOverTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          content: Text(_gameOverSubtitle, style: const TextStyle(color: Colors.white70)),
+          backgroundColor: AppColors.surfaceCard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: AppColors.border, width: 1.2),
+          ),
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 17,
+            ),
+          ),
+          content: Text(
+            reason,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+            ),
+          ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.greenAccent)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.textPrimary,
+                foregroundColor: AppColors.background,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).pop();
+              },
+              child: const Text('Back to Hub', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -153,33 +192,7 @@ class _GameScreenState extends State<GameScreen> {
 
   void _onPlayerMove(String from, String to, String? promo) {
     if (_isGameOver || _turn != _playerColor) return;
-
-    // Optimistic client execution
-    final localRes = ChessEngine.executeMove(_fen, from, to, promotion: promo);
-    if (localRes != null && localRes['valid'] == true) {
-      final san = localRes['san'] as String;
-      final isCap = localRes['isCapture'] as bool;
-      final isCheck = localRes['isCheck'] as bool;
-
-      SoundEffects().playMoveSound(san: san, isCapture: isCap, isCheck: isCheck);
-
-      setState(() {
-        _fen = localRes['newFen'];
-        _turn = localRes['turn'];
-        _lastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
-      });
-
-      _socket?.sendMove(from, to, promotion: promo);
-    } else {
-      SoundEffects().playIllegal();
-    }
-  }
-
-  String _formatTime(int ms) {
-    final totalSec = (ms / 1000).ceil();
-    final min = totalSec ~/ 60;
-    final sec = totalSec % 60;
-    return '$min:${sec.toString().padLeft(2, '0')}';
+    _socket?.sendMove(from, to, promotion: promo);
   }
 
   @override
@@ -187,6 +200,13 @@ class _GameScreenState extends State<GameScreen> {
     _clockTimer?.cancel();
     _socket?.disconnect();
     super.dispose();
+  }
+
+  String _formatTime(int ms) {
+    final totalSec = (ms / 1000).ceil();
+    final m = totalSec ~/ 60;
+    final s = totalSec % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -200,9 +220,10 @@ class _GameScreenState extends State<GameScreen> {
     final bottomColor = isWhiteOriented ? PieceColor.white : PieceColor.black;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF141518),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E2024),
+        backgroundColor: AppColors.surfaceCard,
+        shape: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
         title: Row(
           children: [
             Container(
@@ -210,19 +231,23 @@ class _GameScreenState extends State<GameScreen> {
               height: 8,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _isConnected ? Colors.greenAccent : Colors.redAccent,
+                color: _isConnected ? AppColors.green : AppColors.red,
               ),
             ),
             const SizedBox(width: 8),
             Text(
               _isConnected ? 'Live Duel' : 'Connecting...',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.flag, color: Colors.white70),
+            icon: const AppIcon(name: 'flag', size: 18, color: AppColors.textMuted),
             tooltip: 'Resign',
             onPressed: () {
               _socket?.resign();
@@ -245,7 +270,7 @@ class _GameScreenState extends State<GameScreen> {
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(12.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: ChessBoardWidget(
                     fen: _fen,
                     orientation: _playerColor,
@@ -279,40 +304,62 @@ class _GameScreenState extends State<GameScreen> {
     required bool isActiveTurn,
   }) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2024),
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.surfaceCard,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isActiveTurn ? Colors.greenAccent.withValues(alpha: 0.4) : Colors.white10,
+          color: isActiveTurn ? AppColors.amber.withValues(alpha: 0.6) : AppColors.border,
+          width: isActiveTurn ? 1.5 : 1,
         ),
       ),
       child: Row(
         children: [
           CircleAvatar(
             radius: 16,
-            backgroundColor: const Color(0xFF2A2D35),
-            child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+            backgroundColor: AppColors.surfacePanel,
+            child: Text(
+              name.isNotEmpty ? name[0].toUpperCase() : '?',
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                Text('$rating ELO', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  '$rating ELO',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             decoration: BoxDecoration(
-              color: isActiveTurn ? Colors.greenAccent.withValues(alpha: 0.15) : const Color(0xFF2A2D35),
+              color: isActiveTurn
+                  ? AppColors.amber.withValues(alpha: 0.15)
+                  : AppColors.surfacePanel,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isActiveTurn ? Colors.greenAccent : Colors.white12,
+                color: isActiveTurn ? AppColors.amber : AppColors.border,
               ),
             ),
             child: Text(
@@ -321,7 +368,7 @@ class _GameScreenState extends State<GameScreen> {
                 fontFamily: 'monospace',
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: isActiveTurn ? Colors.greenAccent : Colors.white70,
+                color: isActiveTurn ? AppColors.amber : AppColors.textPrimary,
               ),
             ),
           ),

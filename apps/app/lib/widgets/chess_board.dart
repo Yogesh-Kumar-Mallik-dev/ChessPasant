@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../chess/models.dart';
 import '../chess/engine.dart';
+import '../theme/app_theme.dart';
 
 class ChessBoardWidget extends StatefulWidget {
   final String fen;
@@ -45,7 +46,8 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
       }
 
       // Check if clicking another of player's own pieces
-      if (piece != null && piece.color == widget.turn &&
+      if (piece != null &&
+          piece.color == widget.turn &&
           (widget.playerColor == null || piece.color == widget.playerColor)) {
         setState(() {
           _selectedSquare = sq;
@@ -80,7 +82,8 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
     }
 
     // Select piece
-    if (piece != null && piece.color == widget.turn &&
+    if (piece != null &&
+        piece.color == widget.turn &&
         (widget.playerColor == null || piece.color == widget.playerColor)) {
       setState(() {
         _selectedSquare = sq;
@@ -96,8 +99,19 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
       builder: (ctx) {
         final color = widget.turn;
         return AlertDialog(
-          backgroundColor: const Color(0xFF1E2024),
-          title: const Text('Promote Pawn', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          backgroundColor: AppColors.surfaceCard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppColors.border, width: 1.2),
+          ),
+          title: const Text(
+            'Promote Pawn',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -112,10 +126,17 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
     );
   }
 
-  Widget _promoOption(BuildContext ctx, PieceColor color, PieceType type, String char, String from, String to) {
+  Widget _promoOption(
+    BuildContext ctx,
+    PieceColor color,
+    PieceType type,
+    String char,
+    String from,
+    String to,
+  ) {
     final p = ChessPiece(color: color, type: type);
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       onTap: () {
         Navigator.of(ctx).pop();
         widget.onMove(from, to, char);
@@ -125,9 +146,9 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
         width: 52,
         height: 52,
         decoration: BoxDecoration(
-          color: const Color(0xFF2A2D35),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white24),
+          color: AppColors.surfacePanel,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border),
         ),
         child: SvgPicture.asset(p.assetPath),
       ),
@@ -141,19 +162,20 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
     final isWhiteOriented = widget.orientation == PieceColor.white;
 
     final targetSquares = _legalTargets.map((t) => t.to).toSet();
-    final captureSquares = _legalTargets.where((t) => t.isCapture).map((t) => t.to).toSet();
+    final captureSquares =
+        _legalTargets.where((t) => t.isCapture).map((t) => t.to).toSet();
 
     return AspectRatio(
       aspectRatio: 1.0,
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF3B4048), width: 3),
+          border: Border.all(color: AppColors.border, width: 2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
@@ -165,7 +187,8 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
               child: Row(
                 children: List.generate(8, (colIdx) {
                   final file = isWhiteOriented ? colIdx : 7 - colIdx;
-                  final sqName = '${String.fromCharCode('a'.codeUnitAt(0) + file)}${rank + 1}';
+                  final sqName =
+                      '${String.fromCharCode('a'.codeUnitAt(0) + file)}${rank + 1}';
                   final piece = board[rank][file];
 
                   final isLight = (file + rank) % 2 != 0;
@@ -176,34 +199,55 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                   final isTarget = targetSquares.contains(sqName);
                   final isCaptureTarget = captureSquares.contains(sqName);
 
-                  // Colors: Emerald Theme
-                  Color sqColor = isLight ? const Color(0xFFEEEED2) : const Color(0xFF69884A);
-                  if (isSelected) {
-                    sqColor = const Color(0xFFF7D963);
-                  } else if (isLastMoveFrom || isLastMoveTo) {
-                    sqColor = isLight ? const Color(0xFFCED378) : const Color(0xFFAAB83C);
-                  }
+                  // Authentic Monochrome Studio Noir colors:
+                  // Light: #F4F4F6, Dark: #30323D
+                  final Color baseSqColor =
+                      isLight ? AppColors.boardLight : AppColors.boardDark;
 
                   return Expanded(
                     child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () => _onSquareTapped(sqName, piece),
                       child: Container(
-                        color: sqColor,
+                        color: baseSqColor,
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            // In check radial indicator
+                            // Last move highlight (amber aura)
+                            if (isLastMoveFrom || isLastMoveTo)
+                              Container(
+                                color: isLastMoveTo
+                                    ? AppColors.amber.withValues(alpha: 0.28)
+                                    : AppColors.amber.withValues(alpha: 0.20),
+                              ),
+
+                            // Selected square highlight with amber border
+                            if (isSelected)
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: AppColors.boardSelected,
+                                  border: Border.all(
+                                    color: AppColors.amber.withValues(alpha: 0.85),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+
+                            // King in check radial indicator
                             if (isCheck)
                               Container(
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   gradient: RadialGradient(
-                                    colors: [Colors.redAccent.withValues(alpha: 0.85), Colors.transparent],
+                                    colors: [
+                                      AppColors.red.withValues(alpha: 0.85),
+                                      Colors.transparent,
+                                    ],
                                   ),
                                 ),
                               ),
 
-                            // Piece Icon
+                            // Piece SVG
                             if (piece != null)
                               Padding(
                                 padding: const EdgeInsets.all(4.0),
@@ -222,7 +266,9 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: Colors.black.withValues(alpha: 0.35),
+                                      color: isLight
+                                          ? Colors.black.withValues(alpha: 0.40)
+                                          : Colors.white.withValues(alpha: 0.65),
                                       width: 4.5,
                                     ),
                                   ),
@@ -233,11 +279,13 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                   height: 14,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: Colors.black.withValues(alpha: 0.25),
+                                    color: isLight
+                                        ? Colors.black.withValues(alpha: 0.25)
+                                        : Colors.white.withValues(alpha: 0.45),
                                   ),
                                 ),
 
-                            // Rank coordinate
+                            // Rank coordinate (left edge)
                             if (colIdx == 0)
                               Positioned(
                                 top: 2,
@@ -247,12 +295,14 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
-                                    color: isLight ? const Color(0xFF69884A) : const Color(0xFFEEEED2),
+                                    color: isLight
+                                        ? AppColors.boardDark
+                                        : AppColors.boardLight,
                                   ),
                                 ),
                               ),
 
-                            // File coordinate
+                            // File coordinate (bottom edge)
                             if (rowIdx == 7)
                               Positioned(
                                 bottom: 1,
@@ -262,7 +312,9 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
-                                    color: isLight ? const Color(0xFF69884A) : const Color(0xFFEEEED2),
+                                    color: isLight
+                                        ? AppColors.boardDark
+                                        : AppColors.boardLight,
                                   ),
                                 ),
                               ),

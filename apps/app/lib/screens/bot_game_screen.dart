@@ -4,6 +4,8 @@ import '../chess/models.dart';
 import '../chess/engine.dart';
 import '../audio/sounds.dart';
 import '../widgets/chess_board.dart';
+import '../widgets/app_icon.dart';
+import '../theme/app_theme.dart';
 import '../api/api_client.dart';
 
 class BotGameScreen extends StatefulWidget {
@@ -21,7 +23,6 @@ class _BotGameScreenState extends State<BotGameScreen> {
   LastMoveInfo? _lastMove;
   final List<String> _sanHistory = [];
   bool _isGameOver = false;
-  String _gameResult = '';
   late int _botLevel;
 
   @override
@@ -101,19 +102,24 @@ class _BotGameScreenState extends State<BotGameScreen> {
       }
 
       if (allMoves.isEmpty) {
-        _finishGame('Game Over.');
+        _finishGame('Game Over');
         return;
       }
 
-      // Prioritize captures/checks
-      final tactical = allMoves.where((m) => m.isCapture || m.san.contains('+')).toList();
-      final chosen = tactical.isNotEmpty
-          ? tactical[Random().nextInt(tactical.length)]
-          : allMoves[Random().nextInt(allMoves.length)];
+      // Pick move based on bot level
+      final captures = allMoves.where((m) => m.isCapture).toList();
+      LegalTarget chosen;
+      final rnd = Random();
+
+      if (captures.isNotEmpty && rnd.nextDouble() < (_botLevel * 0.18)) {
+        chosen = captures[rnd.nextInt(captures.length)];
+      } else {
+        chosen = allMoves[rnd.nextInt(allMoves.length)];
+      }
 
       from = chosen.from;
       to = chosen.to;
-      promo = chosen.promotion;
+      promo = chosen.isPromotion ? 'q' : null;
     }
 
     if (from != null && to != null) {
@@ -135,9 +141,9 @@ class _BotGameScreenState extends State<BotGameScreen> {
         });
 
         if (isCheckmate) {
-          _finishGame('Checkmate! Bot won.');
+          _finishGame('Checkmate! Stockfish won.');
         } else if (isDraw) {
-          _finishGame('Draw.');
+          _finishGame('Draw by stalemate or repetition.');
         }
       }
     }
@@ -147,22 +153,57 @@ class _BotGameScreenState extends State<BotGameScreen> {
     SoundEffects().playGameEnd();
     setState(() {
       _isGameOver = true;
-      _gameResult = result;
     });
 
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E2024),
-        title: const Text('Game Ended', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: Text(_gameResult, style: const TextStyle(color: Colors.white70)),
+        backgroundColor: AppColors.surfaceCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.border, width: 1.2),
+        ),
+        title: const Row(
+          children: [
+            AppIcon(name: 'trophy', size: 20, color: AppColors.amber),
+            SizedBox(width: 10),
+            Text(
+              'Match Concluded',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          result,
+          style: const TextStyle(
+            color: AppColors.textMuted,
+            fontSize: 14,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               _resetGame();
             },
-            child: const Text('Play Again', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+            child: const Text('Play Again', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.textPrimary,
+              foregroundColor: AppColors.background,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('Exit to Hub', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -176,7 +217,6 @@ class _BotGameScreenState extends State<BotGameScreen> {
       _lastMove = null;
       _sanHistory.clear();
       _isGameOver = false;
-      _gameResult = '';
     });
     SoundEffects().playGameStart();
   }
@@ -184,13 +224,35 @@ class _BotGameScreenState extends State<BotGameScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF141518),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E2024),
-        title: Text('VS Stockfish Bot (Lvl $_botLevel)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        backgroundColor: AppColors.surfaceCard,
+        shape: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.surfacePanel,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const AppIcon(name: 'swords', size: 16, color: AppColors.textPrimary),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'VS Stockfish Bot (Lvl $_botLevel)',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const AppIcon(name: 'rotate-cw', size: 18, color: AppColors.textMuted),
             onPressed: _resetGame,
             tooltip: 'Restart Match',
           ),
@@ -201,22 +263,53 @@ class _BotGameScreenState extends State<BotGameScreen> {
           children: [
             // Opponent Header Card
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    backgroundColor: Color(0xFF2A2D35),
-                    child: Icon(Icons.smart_toy, color: Colors.greenAccent),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Stockfish Lvl $_botLevel', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(_turn != _playerColor ? 'Thinking...' : 'Waiting...', style: const TextStyle(fontSize: 12, color: Colors.white54)),
-                    ],
-                  ),
-                ],
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfacePanel,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: const Center(
+                        child: AppIcon(name: 'smart_toy', size: 20, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Stockfish Engine • Level $_botLevel',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            _turn != _playerColor ? 'Calculating optimal reply...' : 'Waiting for move...',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _turn != _playerColor ? AppColors.amber : AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
@@ -224,7 +317,7 @@ class _BotGameScreenState extends State<BotGameScreen> {
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(12.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: ChessBoardWidget(
                     fen: _fen,
                     orientation: _playerColor,
@@ -240,22 +333,53 @@ class _BotGameScreenState extends State<BotGameScreen> {
 
             // Player Header Card
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    backgroundColor: Color(0xFF2A2D35),
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('You', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(_turn == _playerColor ? 'Your turn to move' : 'Waiting for bot...', style: const TextStyle(fontSize: 12, color: Colors.white54)),
-                    ],
-                  ),
-                ],
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfacePanel,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: const Center(
+                        child: AppIcon(name: 'user', size: 20, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'You (White)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            _turn == _playerColor ? 'Your turn to move' : 'Waiting for opponent...',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _turn == _playerColor ? AppColors.textPrimary : AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
