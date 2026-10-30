@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to attach binaries to (e.g. v0.1.8)'
+        description: 'Release tag to attach binaries to (e.g. v0.1.9)'
         required: true
         type: string
-        default: 'v0.1.8'
+        default: 'v0.1.9'
       release_draft:
         description: 'Publish as Draft Release'
         required: true
@@ -62,7 +62,7 @@ jobs:
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
+          VERSION="${VERSION:-0.1.9}"
           mkdir -p dist/linux dist/arch
 
           echo "==> Creating standalone Linux tarball..."
@@ -136,7 +136,7 @@ jobs:
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
+          VERSION="${VERSION:-0.1.9}"
           mkdir -p dist/android
 
           if [ -f apps/app/build/app/outputs/flutter-apk/app-release.apk ]; then
@@ -180,7 +180,7 @@ jobs:
         run: |
           $rawTag = "${{ github.event.inputs.tag || github.ref_name }}"
           $version = $rawTag -replace '^v',''
-          if (-not $version) { $version = "0.1.8" }
+          if (-not $version) { $version = "0.1.9" }
           New-Item -ItemType Directory -Force -Path dist/windows
           $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue)?.Source
           if (-not $iscc) {
@@ -193,7 +193,7 @@ jobs:
         run: |
           $rawTag = "${{ github.event.inputs.tag || github.ref_name }}"
           $version = $rawTag -replace '^v',''
-          if (-not $version) { $version = "0.1.8" }
+          if (-not $version) { $version = "0.1.9" }
           New-Item -ItemType Directory -Force -Path dist/windows
           Compress-Archive -Path apps/app/build/windows/x64/runner/Release/* -DestinationPath "dist/windows/ChessPasant_${version}_windows_x64.zip" -Force
 
@@ -230,7 +230,7 @@ jobs:
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
+          VERSION="${VERSION:-0.1.9}"
           mkdir -p dist/macos
 
           echo "==> Creating macOS Drag-and-Drop .dmg installer..."
@@ -253,7 +253,7 @@ jobs:
         run: |
           RAW_TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${RAW_TAG#v}"
-          VERSION="${VERSION:-0.1.8}"
+          VERSION="${VERSION:-0.1.9}"
           mkdir -p dist/ios /tmp/Payload
 
           cp -r apps/app/build/ios/iphoneos/Runner.app /tmp/Payload/

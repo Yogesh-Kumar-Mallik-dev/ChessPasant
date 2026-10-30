@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-VERSION="${1:-0.1.8}"
+VERSION="${1:-0.1.9}"
 OUTPUT_DIR="${2:-$ROOT_DIR/dist/arch}"
 
 echo "==> [arch] Building Arch Linux release package for ChessPasant v${VERSION}..."
