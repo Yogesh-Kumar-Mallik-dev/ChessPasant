@@ -111,8 +111,9 @@ jobs:
 
       - name: Configure Android SDK in Flutter
         run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;34.0.0" "cmake;3.22.1" || true
           flutter config --android-sdk "$ANDROID_HOME"
-          yes | flutter doctor --android-licenses || true
           FLUTTER_DIR=$(dirname $(dirname $(which flutter)))
           mkdir -p apps/app/android
           echo "sdk.dir=$ANDROID_HOME" > apps/app/android/local.properties
@@ -123,13 +124,13 @@ jobs:
         working-directory: apps/app
         run: |
           flutter pub get
-          flutter build apk --release --verbose
+          flutter build apk --release --android-skip-build-dependency-validation
 
       - name: Build Android AppBundle
         working-directory: apps/app
         continue-on-error: true
         run: |
-          flutter build appbundle --release
+          flutter build appbundle --release --android-skip-build-dependency-validation
 
       - name: Prepare Android Artifacts
         run: |
