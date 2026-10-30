@@ -10,6 +10,8 @@ class ChessBoardWidget extends StatefulWidget {
   final PieceColor turn;
   final PieceColor? playerColor;
   final LastMoveInfo? lastMove;
+  final String? hintSquare;
+  final String? hintTarget;
   final bool interactive;
   final Function(String from, String to, String? promotion) onMove;
 
@@ -20,6 +22,8 @@ class ChessBoardWidget extends StatefulWidget {
     this.turn = PieceColor.white,
     this.playerColor,
     this.lastMove,
+    this.hintSquare,
+    this.hintTarget,
     this.interactive = true,
     required this.onMove,
   });
@@ -185,6 +189,7 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
             final rank = isWhiteOriented ? 7 - rowIdx : rowIdx;
             return Expanded(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: List.generate(8, (colIdx) {
                   final file = isWhiteOriented ? colIdx : 7 - colIdx;
                   final sqName =
@@ -196,6 +201,8 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                   final isLastMoveFrom = widget.lastMove?.from == sqName;
                   final isLastMoveTo = widget.lastMove?.to == sqName;
                   final isCheck = checkedKingSq == sqName;
+                  final isHintSquare = widget.hintSquare == sqName;
+                  final isHintTarget = widget.hintTarget == sqName;
                   final isTarget = targetSquares.contains(sqName);
                   final isCaptureTarget = captureSquares.contains(sqName);
 
@@ -209,8 +216,11 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                       behavior: HitTestBehavior.opaque,
                       onTap: () => _onSquareTapped(sqName, piece),
                       child: Container(
+                        width: double.infinity,
+                        height: double.infinity,
                         color: baseSqColor,
                         child: Stack(
+                          fit: StackFit.expand,
                           alignment: Alignment.center,
                           children: [
                             // Last move highlight (amber aura)
@@ -247,6 +257,19 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                 ),
                               ),
 
+                            // Hint highlight (Level 1: source piece, Level 2: target square)
+                            if (isHintSquare || isHintTarget)
+                              Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: isHintSquare ? AppColors.amber : AppColors.green,
+                                    width: 2.5,
+                                  ),
+                                  color: (isHintSquare ? AppColors.amber : AppColors.green)
+                                      .withValues(alpha: 0.25),
+                                ),
+                              ),
+
                             // Piece SVG
                             if (piece != null)
                               Padding(
@@ -257,33 +280,34 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                                 ),
                               ),
 
-                            // Legal move dot / capture ring
+                            // Legal move dot / capture ring (Centered cleanly inside StackFit.expand without altering square dimension)
                             if (isTarget)
-                              if (isCaptureTarget)
-                                Container(
-                                  width: 32,
-                                  height: 32,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: isLight
-                                          ? Colors.black.withValues(alpha: 0.40)
-                                          : Colors.white.withValues(alpha: 0.65),
-                                      width: 4.5,
-                                    ),
-                                  ),
-                                )
-                              else
-                                Container(
-                                  width: 14,
-                                  height: 14,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: isLight
-                                        ? Colors.black.withValues(alpha: 0.25)
-                                        : Colors.white.withValues(alpha: 0.45),
-                                  ),
-                                ),
+                              Center(
+                                child: isCaptureTarget
+                                    ? Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: isLight
+                                                ? Colors.black.withValues(alpha: 0.40)
+                                                : Colors.white.withValues(alpha: 0.65),
+                                            width: 4.5,
+                                          ),
+                                        ),
+                                      )
+                                    : Container(
+                                        width: 14,
+                                        height: 14,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: isLight
+                                              ? Colors.black.withValues(alpha: 0.28)
+                                              : Colors.white.withValues(alpha: 0.50),
+                                        ),
+                                      ),
+                              ),
 
                             // Rank coordinate (left edge)
                             if (colIdx == 0)

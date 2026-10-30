@@ -188,6 +188,26 @@ class ApiClient {
   }
 
   // Puzzles
+  Future<Map<String, dynamic>?> getRandomPuzzle({
+    String? category,
+    int? tier,
+    int? minRating,
+    int? maxRating,
+  }) async {
+    try {
+      final query = <String, dynamic>{};
+      if (category != null && category != 'all') query['category'] = category;
+      if (tier != null && tier > 0) query['tier'] = tier;
+      if (minRating != null) query['minRating'] = minRating;
+      if (maxRating != null) query['maxRating'] = maxRating;
+
+      final res = await _dio.get('/puzzles/random', queryParameters: query);
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> getDailyPuzzle() async {
     try {
       final res = await _dio.get('/puzzles/daily');
@@ -197,9 +217,47 @@ class ApiClient {
     }
   }
 
+  Future<List<dynamic>> getWeeklyPuzzles() async {
+    try {
+      final res = await _dio.get('/puzzles/weekly');
+      return res.data is List ? res.data : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getPuzzleHint(String puzzleId, {int plyIndex = 0}) async {
+    try {
+      final res = await _dio.get('/puzzles/$puzzleId/hint', queryParameters: {'plyIndex': plyIndex});
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> getPuzzleSolution(String puzzleId) async {
     try {
       final res = await _dio.get('/puzzles/$puzzleId/solution');
+      return res.data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> solvePuzzle(
+    String puzzleId, {
+    required String move,
+    required int plyIndex,
+    bool isRetry = false,
+    bool hasAssistance = false,
+  }) async {
+    try {
+      final res = await _dio.post('/puzzles/$puzzleId/solve', data: {
+        'move': move,
+        'plyIndex': plyIndex,
+        'isRetry': isRetry,
+        'hasAssistance': hasAssistance,
+      });
       return res.data;
     } catch (_) {
       return null;

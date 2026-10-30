@@ -36,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'puzzles': 400,
   };
   bool _isLoginMode = true;
+  bool _obscurePassword = true;
   final TextEditingController _authUsernameCtrl = TextEditingController();
   final TextEditingController _authEmailCtrl = TextEditingController();
   final TextEditingController _authPasswordCtrl = TextEditingController();
@@ -88,13 +89,37 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedBotLevel = 2;
 
   // ==========================================
-  // TACTICS LAB STATE (PUZZLES TAB)
+  // PUZZLES & TACTICS LAB STATE (PUZZLES TAB)
   // ==========================================
-  String _tacticsFen = 'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 5';
-  PieceColor _tacticsTurn = PieceColor.white;
-  LastMoveInfo? _tacticsLastMove;
-  String _tacticsStatus = 'White to play. Find the tactical motif!';
-  bool _tacticsSolved = false;
+  String _puzzleMode = 'practice'; // 'practice', 'daily', 'weekly'
+  String _puzzleCategory = 'all'; // 'all', 'mate', 'fork', 'pin', 'skewer', 'capture'
+  int _puzzleTier = 0; // 0 = all, 1 = Novice, 2 = Intermediate, 3 = Advanced, 4 = Expert, 5 = Master
+  List<dynamic> _puzzleWeeklyList = [];
+  int _puzzleWeeklyIndex = 0;
+
+  Map<String, dynamic>? _puzzleData;
+  String _puzzleFen = initialFen;
+  PieceColor _puzzleTurn = PieceColor.white;
+  PieceColor _puzzlePlayerColor = PieceColor.white;
+  PieceColor _puzzleOrientation = PieceColor.white;
+  LastMoveInfo? _puzzleLastMove;
+  int _puzzleSolutionIdx = 0;
+  bool _puzzleSolved = false;
+  bool _puzzleLoading = false;
+  String _puzzleStatusMsg = 'Find the best tactical sequence in this position.';
+  Color _puzzleStatusColor = AppColors.textPrimary;
+  int? _puzzleRatingDiff;
+  int _puzzleSolvedToday = 0;
+
+  // Assistance and playback state
+  String? _puzzleHintSquare;
+  String? _puzzleHintTarget;
+  int _puzzleHintCount = 0;
+  bool _puzzleIsSolutionRevealed = false;
+  List<String> _puzzleSolutionMoves = [];
+  bool _puzzleIsOpponentReplying = false;
+  bool _puzzleIsRetrying = false;
+  bool _puzzleHasAssistance = false;
 
   // ==========================================
   // ANALYSIS BOARD STATE (ANALYSIS TAB)
@@ -120,6 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _selectedOnlinePreset = _onlinePresets[2]; // Default 3 min Blitz
     _loadAuthProfile();
     _loadDailyPuzzle();
+    _loadPuzzleTabPuzzle();
     _evaluateCurrentAnalysisPosition();
   }
 
@@ -613,30 +639,466 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================
-  // TACTICS LAB LOGIC
+  // PUZZLES TAB LOGIC
   // ==========================================
-  void _onTacticsMove(String from, String to, String? promo) {
-    if (_tacticsSolved) return;
-    final res = ChessEngine.executeMove(_tacticsFen, from, to, promotion: promo);
+  Future<void> _loadPuzzleTabPuzzle({String? overrideMode}) async {
+    final mode = overrideMode ?? _puzzleMode;
+    setState(() {
+      _puzzleMode = mode;
+      _puzzleLoading = true;
+      _puzzleStatusMsg = mode == 'daily'
+          ? "Today's Daily Challenge. Find the master combination!"
+          : mode == 'weekly'
+              ? 'Weekly Challenge ${_puzzleWeeklyIndex + 1} of ${_puzzleWeeklyList.isNotEmpty ? _puzzleWeeklyList.length : 7}. Calculate precisely!'
+              : 'Find the best tactical sequence in this position.';
+      _puzzleStatusColor = AppColors.textPrimary;
+      _puzzleSolutionIdx = 0;
+      _puzzleSolved = false;
+      _puzzleLastMove = null;
+      _puzzleRatingDiff = null;
+      _puzzleIsRetrying = false;
+      _puzzleHasAssistance = false;
+      _puzzleHintSquare = null;
+      _puzzleHintTarget = null;
+      _puzzleHintCount = 0;
+      _puzzleIsSolutionRevealed = false;
+      _puzzleSolutionMoves = [];
+      _puzzleIsOpponentReplying = false;
+    });
+
+    try {
+      Map<String, dynamic>? p;
+      if (mode == 'daily') {
+        p = await ApiClient().getDailyPuzzle();
+      } else if (mode == 'weekly') {
+        if (_puzzleWeeklyList.isEmpty) {
+          _puzzleWeeklyList = await ApiClient().getWeeklyPuzzles();
+        }
+        if (_puzzleWeeklyList.isNotEmpty) {
+          final item = _puzzleWeeklyList[_puzzleWeeklyIndex % _puzzleWeeklyList.length];
+          p = Map<String, dynamic>.from(item as Map);
+        } else {
+          p = await ApiClient().getRandomPuzzle();
+        }
+      } else {
+        p = await ApiClient().getRandomPuzzle(
+          category: _puzzleCategory != 'all' ? _puzzleCategory : null,
+          tier: _puzzleTier > 0 ? _puzzleTier : null,
+        );
+      }
+
+      if (p != null && p['fen'] != null) {
+        final fen = p['fen'] as String;
+        final parts = fen.split(' ');
+        final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+
+        // Prefetch solution if not already present
+        if (p['solution'] == null || (p['solution'] as List).isEmpty) {
+          ApiClient().getPuzzleSolution(p['id'].toString()).then((solRes) {
+            if (solRes != null && solRes['solution'] != null && _puzzleData?['id'] == p?['id']) {
+              setState(() {
+                _puzzleData?['solution'] = solRes['solution'];
+              });
+            }
+          });
+        }
+
+        setState(() {
+          _puzzleData = p;
+          _puzzleFen = fen;
+          _puzzleTurn = turn;
+          _puzzlePlayerColor = turn;
+          _puzzleOrientation = turn;
+        });
+      } else {
+        setState(() {
+          _puzzleStatusMsg = 'Failed to load puzzle. Tap Next to retry.';
+          _puzzleStatusColor = AppColors.red;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _puzzleStatusMsg = 'Error fetching tactical position.';
+        _puzzleStatusColor = AppColors.red;
+      });
+    } finally {
+      setState(() => _puzzleLoading = false);
+    }
+  }
+
+  Future<void> _onPuzzleMove(String from, String to, String? promo) async {
+    if (_puzzleData == null ||
+        _puzzleSolved ||
+        _puzzleIsSolutionRevealed ||
+        _puzzleIsOpponentReplying) {
+      return;
+    }
+    if (_puzzleTurn != _puzzlePlayerColor) return;
+
+    final uci = '$from$to${promo?.toLowerCase() ?? ''}';
+
+    // Execute move locally first to ensure chess legality
+    final localRes = ChessEngine.executeMove(_puzzleFen, from, to, promotion: promo);
+    if (localRes == null || localRes['valid'] != true) {
+      SoundEffects().playIllegal();
+      return;
+    }
+
+    final san = localRes['san'] as String;
+    final isCap = localRes['isCapture'] as bool;
+    SoundEffects().playMoveSound(san: san, isCapture: isCap);
+
+    setState(() {
+      _puzzleFen = localRes['newFen'] as String;
+      _puzzleTurn = localRes['turn'] as PieceColor;
+      _puzzleLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
+      _puzzleHintSquare = null;
+      _puzzleHintTarget = null;
+    });
+
+    final solutionList = _puzzleData!['solution'] as List?;
+    if (solutionList != null && solutionList.isNotEmpty) {
+      final expectedMove = (_puzzleSolutionIdx < solutionList.length)
+          ? (solutionList[_puzzleSolutionIdx] as String)
+          : '';
+
+      final isCorrect = expectedMove.isNotEmpty &&
+          (expectedMove.toLowerCase() == uci.toLowerCase() ||
+              expectedMove.toLowerCase().startsWith(uci.toLowerCase()));
+
+      if (isCorrect) {
+        final isFinished = _puzzleSolutionIdx + 1 >= solutionList.length;
+        if (isFinished) {
+          SoundEffects().playGameEnd();
+          setState(() {
+            _puzzleSolved = true;
+            _puzzleStatusMsg = _puzzleHasAssistance || _puzzleIsRetrying
+                ? 'Puzzle solved with practice/assistance!'
+                : 'Brilliant! Tactical combination completed successfully.';
+            _puzzleStatusColor = AppColors.green;
+            _puzzleSolvedToday++;
+          });
+
+          // Report solve to backend
+          ApiClient().solvePuzzle(
+            _puzzleData!['id'].toString(),
+            move: uci,
+            plyIndex: _puzzleSolutionIdx,
+            isRetry: _puzzleIsRetrying,
+            hasAssistance: _puzzleHasAssistance,
+          ).then((check) {
+            if (check != null && !_puzzleIsRetrying && !_puzzleHasAssistance) {
+              if (check['diff'] != null) {
+                setState(() {
+                  _puzzleRatingDiff = check['diff'] is num ? (check['diff'] as num).toInt() : null;
+                  if (check['newRating'] != null) {
+                    _userRatings['puzzles'] = check['newRating'];
+                  }
+                });
+              }
+            }
+          });
+        } else {
+          // Play opponent response
+          final nextPly = _puzzleSolutionIdx + 1;
+          final replyUci = solutionList[nextPly] as String;
+          setState(() {
+            _puzzleSolutionIdx = nextPly + 1;
+            _puzzleStatusMsg = 'Best move found! Continue the tactical sequence...';
+            _puzzleStatusColor = AppColors.textPrimary;
+            _puzzleIsOpponentReplying = true;
+          });
+
+          // Report intermediate solve
+          ApiClient().solvePuzzle(
+            _puzzleData!['id'].toString(),
+            move: uci,
+            plyIndex: _puzzleSolutionIdx - 2,
+            isRetry: _puzzleIsRetrying,
+            hasAssistance: _puzzleHasAssistance,
+          );
+
+          Future.delayed(const Duration(milliseconds: 350), () {
+            if (!mounted || _puzzleData == null) return;
+            final replyFrom = replyUci.substring(0, 2);
+            final replyTo = replyUci.substring(2, 4);
+            final replyPromo = replyUci.length > 4 ? replyUci.substring(4, 5) : null;
+            final replyRes = ChessEngine.executeMove(_puzzleFen, replyFrom, replyTo, promotion: replyPromo);
+            if (replyRes != null && replyRes['valid'] == true) {
+              final rSan = replyRes['san'] as String;
+              final rCap = replyRes['isCapture'] as bool;
+              SoundEffects().playMoveSound(san: rSan, isCapture: rCap);
+              setState(() {
+                _puzzleFen = replyRes['newFen'] as String;
+                _puzzleTurn = replyRes['turn'] as PieceColor;
+                _puzzleLastMove = LastMoveInfo(from: replyFrom, to: replyTo, san: rSan, isCapture: rCap);
+                _puzzleIsOpponentReplying = false;
+              });
+            }
+          });
+        }
+      } else {
+        // Wrong move
+        SoundEffects().playIllegal();
+        setState(() {
+          _puzzleStatusMsg = 'Not the optimal move. Resetting position...';
+          _puzzleStatusColor = AppColors.red;
+          _puzzleIsRetrying = true;
+        });
+
+        ApiClient().solvePuzzle(
+          _puzzleData!['id'].toString(),
+          move: uci,
+          plyIndex: _puzzleSolutionIdx,
+          isRetry: _puzzleIsRetrying,
+          hasAssistance: _puzzleHasAssistance,
+        ).then((check) {
+          if (check != null && check['diff'] != null && !_puzzleHasAssistance) {
+            setState(() {
+              _puzzleRatingDiff = check['diff'] is num ? (check['diff'] as num).toInt() : null;
+              if (check['newRating'] != null) {
+                _userRatings['puzzles'] = check['newRating'];
+              }
+            });
+          }
+        });
+
+        Future.delayed(const Duration(milliseconds: 850), () {
+          if (!mounted || _puzzleData == null || _puzzleSolved) return;
+          final fen = _puzzleData!['fen'] as String;
+          final parts = fen.split(' ');
+          final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+          setState(() {
+            _puzzleFen = fen;
+            _puzzleTurn = turn;
+            _puzzlePlayerColor = turn;
+            _puzzleLastMove = null;
+            _puzzleHintSquare = null;
+            _puzzleHintTarget = null;
+            _puzzleIsOpponentReplying = false;
+            _puzzleStatusMsg = 'Try another tactical combination!';
+            _puzzleStatusColor = AppColors.textPrimary;
+          });
+        });
+      }
+      return;
+    }
+
+    // Fallback: solve via API directly if solution not cached
+    try {
+      final check = await ApiClient().solvePuzzle(
+        _puzzleData!['id'].toString(),
+        move: uci,
+        plyIndex: _puzzleSolutionIdx,
+        isRetry: _puzzleIsRetrying,
+        hasAssistance: _puzzleHasAssistance,
+      );
+
+      if (check != null && check['correct'] == true) {
+        if (check['finished'] == true) {
+          SoundEffects().playGameEnd();
+          setState(() {
+            _puzzleSolved = true;
+            _puzzleStatusMsg = 'Brilliant! Tactical combination completed successfully.';
+            _puzzleStatusColor = AppColors.green;
+            _puzzleSolvedToday++;
+            if (check['diff'] != null) {
+              _puzzleRatingDiff = check['diff'] is num ? (check['diff'] as num).toInt() : null;
+            }
+            if (check['newRating'] != null) {
+              _userRatings['puzzles'] = check['newRating'];
+            }
+          });
+        } else {
+          setState(() {
+            _puzzleSolutionIdx += 2;
+            _puzzleStatusMsg = 'Best move found! Continue the tactical sequence...';
+            _puzzleStatusColor = AppColors.textPrimary;
+          });
+          if (check['replyMove'] != null) {
+            final replyUci = check['replyMove'] as String;
+            setState(() => _puzzleIsOpponentReplying = true);
+            Future.delayed(const Duration(milliseconds: 350), () {
+              if (!mounted) return;
+              final replyFrom = replyUci.substring(0, 2);
+              final replyTo = replyUci.substring(2, 4);
+              final replyPromo = replyUci.length > 4 ? replyUci.substring(4, 5) : null;
+              final replyRes = ChessEngine.executeMove(_puzzleFen, replyFrom, replyTo, promotion: replyPromo);
+              if (replyRes != null && replyRes['valid'] == true) {
+                final rSan = replyRes['san'] as String;
+                final rCap = replyRes['isCapture'] as bool;
+                SoundEffects().playMoveSound(san: rSan, isCapture: rCap);
+                setState(() {
+                  _puzzleFen = replyRes['newFen'] as String;
+                  _puzzleTurn = replyRes['turn'] as PieceColor;
+                  _puzzleLastMove = LastMoveInfo(from: replyFrom, to: replyTo, san: rSan, isCapture: rCap);
+                  _puzzleIsOpponentReplying = false;
+                });
+              }
+            });
+          }
+        }
+      } else {
+        SoundEffects().playIllegal();
+        setState(() {
+          _puzzleStatusMsg = 'Not the optimal move. Resetting position...';
+          _puzzleStatusColor = AppColors.red;
+          _puzzleIsRetrying = true;
+        });
+        Future.delayed(const Duration(milliseconds: 850), () {
+          if (!mounted || _puzzleData == null) return;
+          final fen = _puzzleData!['fen'] as String;
+          final parts = fen.split(' ');
+          final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+          setState(() {
+            _puzzleFen = fen;
+            _puzzleTurn = turn;
+            _puzzlePlayerColor = turn;
+            _puzzleLastMove = null;
+            _puzzleHintSquare = null;
+            _puzzleHintTarget = null;
+            _puzzleStatusMsg = 'Try another tactical combination!';
+            _puzzleStatusColor = AppColors.textPrimary;
+          });
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _requestPuzzleHint() async {
+    if (_puzzleData == null || _puzzleSolved || _puzzleIsSolutionRevealed) return;
+    setState(() => _puzzleHasAssistance = true);
+    final hint = await ApiClient().getPuzzleHint(
+      _puzzleData!['id'].toString(),
+      plyIndex: _puzzleSolutionIdx,
+    );
+    if (hint != null && hint['from'] != null) {
+      if (_puzzleHintCount == 0) {
+        setState(() {
+          _puzzleHintSquare = hint['from'].toString().toLowerCase();
+          _puzzleStatusMsg = 'Tactical Hint: Focus on the piece on ${hint['from'].toString().toUpperCase()}!';
+          _puzzleStatusColor = AppColors.amber;
+          _puzzleHintCount = 1;
+        });
+      } else {
+        setState(() {
+          _puzzleHintSquare = hint['from'].toString().toLowerCase();
+          _puzzleHintTarget = hint['to'].toString().toLowerCase();
+          _puzzleStatusMsg = 'Direct Hint: Move piece to ${hint['to'].toString().toUpperCase()}!';
+          _puzzleStatusColor = AppColors.amber;
+        });
+      }
+    } else {
+      setState(() {
+        _puzzleStatusMsg = 'No hint available for this position.';
+      });
+    }
+  }
+
+  Future<void> _revealPuzzleSolution() async {
+    if (_puzzleData == null) return;
+    setState(() {
+      _puzzleHasAssistance = true;
+      _puzzleIsSolutionRevealed = true;
+      _puzzleIsOpponentReplying = false;
+      _puzzleFen = _puzzleData!['fen'] as String;
+      _puzzleLastMove = null;
+      _puzzleHintSquare = null;
+      _puzzleHintTarget = null;
+      final parts = _puzzleFen.split(' ');
+      _puzzleTurn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+      _puzzlePlayerColor = _puzzleTurn;
+      _puzzleSolutionIdx = 0;
+      _puzzleStatusMsg = 'Solution revealed. Playing through the winning moves...';
+      _puzzleStatusColor = AppColors.amber;
+    });
+
+    List<String> moves = [];
+    if (_puzzleData!['solution'] != null && (_puzzleData!['solution'] as List).isNotEmpty) {
+      moves = List<String>.from(_puzzleData!['solution'] as List);
+    } else {
+      final sol = await ApiClient().getPuzzleSolution(_puzzleData!['id'].toString());
+      if (sol != null && sol['solution'] != null) {
+        moves = List<String>.from(sol['solution'] as List);
+        _puzzleData!['solution'] = moves;
+      }
+    }
+    _puzzleSolutionMoves = moves;
+    _playSolutionStep(0);
+  }
+
+  void _playSolutionStep(int idx) {
+    if (!mounted || !_puzzleIsSolutionRevealed) return;
+    if (idx >= _puzzleSolutionMoves.length) {
+      setState(() {
+        _puzzleStatusMsg = 'Solution playback complete. Review the tactical pattern.';
+        _puzzleStatusColor = AppColors.green;
+      });
+      return;
+    }
+
+    final moveUci = _puzzleSolutionMoves[idx];
+    final from = moveUci.substring(0, 2);
+    final to = moveUci.substring(2, 4);
+    final promo = moveUci.length > 4 ? moveUci.substring(4, 5) : null;
+
+    final res = ChessEngine.executeMove(_puzzleFen, from, to, promotion: promo);
     if (res != null && res['valid'] == true) {
       final san = res['san'] as String;
       final isCap = res['isCapture'] as bool;
       SoundEffects().playMoveSound(san: san, isCapture: isCap);
       setState(() {
-        _tacticsFen = res['newFen'];
-        _tacticsTurn = res['turn'];
-        _tacticsLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
-        if (san.contains('Bxf7') || san.contains('Bxf7+')) {
-          _tacticsSolved = true;
-          _tacticsStatus = 'Splendid! Sacrifice opens the king.';
-          SoundEffects().playGameEnd();
-        } else {
-          _tacticsStatus = 'Good move! Continue your line.';
-        }
+        _puzzleFen = res['newFen'] as String;
+        _puzzleTurn = res['turn'] as PieceColor;
+        _puzzleLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
+      });
+    }
+
+    if (idx + 1 < _puzzleSolutionMoves.length) {
+      Future.delayed(const Duration(milliseconds: 650), () {
+        _playSolutionStep(idx + 1);
       });
     } else {
-      SoundEffects().playIllegal();
+      setState(() {
+        _puzzleStatusMsg = 'Solution complete! Review the tactical pattern.';
+        _puzzleStatusColor = AppColors.green;
+      });
     }
+  }
+
+  void _resetPuzzle() {
+    if (_puzzleData == null) return;
+    final fen = _puzzleData!['fen'] as String;
+    final parts = fen.split(' ');
+    final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+    setState(() {
+      _puzzleFen = fen;
+      _puzzleTurn = turn;
+      _puzzlePlayerColor = turn;
+      _puzzleSolutionIdx = 0;
+      _puzzleSolved = false;
+      _puzzleIsRetrying = true;
+      _puzzleHintSquare = null;
+      _puzzleHintTarget = null;
+      _puzzleLastMove = null;
+      _puzzleIsSolutionRevealed = false;
+      _puzzleIsOpponentReplying = false;
+      _puzzleStatusMsg = 'Position reset. Find the optimal tactical combination!';
+      _puzzleStatusColor = AppColors.textPrimary;
+    });
+  }
+
+  void _nextPuzzle() {
+    if (_puzzleMode == 'weekly' && _puzzleWeeklyList.isNotEmpty) {
+      _puzzleWeeklyIndex = (_puzzleWeeklyIndex + 1) % _puzzleWeeklyList.length;
+    }
+    _loadPuzzleTabPuzzle();
+  }
+
+  void _flipPuzzleBoard() {
+    setState(() {
+      _puzzleOrientation = _puzzleOrientation == PieceColor.white ? PieceColor.black : PieceColor.white;
+    });
   }
 
   // ==========================================
@@ -1468,44 +1930,99 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================
-  // TAB 2: PUZZLES (TACTICS LAB)
+  // TAB 2: PUZZLES (TACTICS LAB & PUZZLE MODES)
   // ==========================================
   Widget _buildPuzzlesTab() {
+    final categories = ['all', 'mate', 'fork', 'pin', 'skewer', 'capture'];
+    final tiers = [
+      {'tier': 0, 'label': 'All Levels'},
+      {'tier': 1, 'label': 'Novice (<1000)'},
+      {'tier': 2, 'label': 'Intermediate (1000-1400)'},
+      {'tier': 3, 'label': 'Advanced (1400-1800)'},
+      {'tier': 4, 'label': 'Expert (1800-2200)'},
+      {'tier': 5, 'label': 'Master (2200+)'},
+    ];
+
+    final isWhiteTurn = _puzzleTurn == PieceColor.white;
+    final puzzleRating = _puzzleData?['rating']?.toString() ?? '1500';
+    final puzzleCategory = (_puzzleData?['category']?.toString() ?? 'tactics').toUpperCase();
+
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 96),
+        padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 96),
         children: [
+          // Header: Title & Quick Rating & Flip
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Tactics Lab', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-                  Text('Master motifs and puzzle solving', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  Text(
+                    'Tactics & Puzzles',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.textPrimary),
+                  ),
+                  Text(
+                    'Master motifs and tactical patterns',
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceCard,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Row(
-                  children: [
-                    const AppIcon(name: 'trophy', size: 14, color: AppColors.amber),
-                    const SizedBox(width: 6),
-                    Text('${_userRatings['puzzles'] ?? 1500} Elo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.textPrimary)),
-                  ],
-                ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceCard,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const AppIcon(name: 'trophy', size: 14, color: AppColors.amber),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_userRatings['puzzles'] ?? 400} Elo',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.textPrimary),
+                        ),
+                        if (_puzzleRatingDiff != null) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            _puzzleRatingDiff! > 0 ? '+${_puzzleRatingDiff!}' : '${_puzzleRatingDiff!}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: _puzzleRatingDiff! > 0 ? AppColors.green : AppColors.red,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const AppIcon(name: 'rotate-cw', size: 16, color: AppColors.textMuted),
+                    onPressed: _flipPuzzleBoard,
+                    tooltip: 'Flip Board',
+                    style: IconButton.styleFrom(
+                      backgroundColor: AppColors.surfaceCard,
+                      padding: const EdgeInsets.all(8),
+                      minimumSize: const Size(36, 36),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: const BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
 
+          // Mode Switcher: Practice, Daily, Weekly
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: AppColors.surfaceCard,
               borderRadius: BorderRadius.circular(14),
@@ -1513,52 +2030,432 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             child: Row(
               children: [
-                AppIcon(name: _tacticsSolved ? 'check' : 'puzzle', size: 16, color: _tacticsSolved ? AppColors.green : AppColors.amber),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Text(_tacticsStatus, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _tacticsSolved ? AppColors.green : AppColors.textPrimary)),
+                  child: _puzzleModeButton(
+                    mode: 'practice',
+                    label: 'Practice',
+                    icon: 'puzzle',
+                    isSelected: _puzzleMode == 'practice',
+                    onTap: () {
+                      if (_puzzleMode != 'practice') {
+                        _loadPuzzleTabPuzzle(overrideMode: 'practice');
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _puzzleModeButton(
+                    mode: 'daily',
+                    label: 'Daily',
+                    icon: 'flame',
+                    isSelected: _puzzleMode == 'daily',
+                    onTap: () {
+                      if (_puzzleMode != 'daily') {
+                        _loadPuzzleTabPuzzle(overrideMode: 'daily');
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: _puzzleModeButton(
+                    mode: 'weekly',
+                    label: 'Weekly',
+                    icon: 'trophy',
+                    badge: _puzzleWeeklyList.isNotEmpty ? '${_puzzleWeeklyIndex + 1}/${_puzzleWeeklyList.length}' : '7',
+                    isSelected: _puzzleMode == 'weekly',
+                    onTap: () {
+                      if (_puzzleMode != 'weekly') {
+                        _loadPuzzleTabPuzzle(overrideMode: 'weekly');
+                      }
+                    },
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
 
+          // Category & Difficulty Selection (Visible in Practice Mode)
+          if (_puzzleMode == 'practice') ...[
+            // Category Chips
+            SizedBox(
+              height: 32,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (context, idx) {
+                  final cat = categories[idx];
+                  final isSel = _puzzleCategory == cat;
+                  return GestureDetector(
+                    onTap: () {
+                      if (_puzzleCategory != cat) {
+                        setState(() => _puzzleCategory = cat);
+                        _loadPuzzleTabPuzzle();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isSel ? AppColors.textPrimary : AppColors.surfaceCard,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: isSel ? AppColors.textPrimary : AppColors.border),
+                      ),
+                      child: Center(
+                        child: Text(
+                          cat[0].toUpperCase() + cat.substring(1),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isSel ? AppColors.background : AppColors.textMuted,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Tier / Difficulty Chips
+            SizedBox(
+              height: 30,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: tiers.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (context, idx) {
+                  final t = tiers[idx];
+                  final tierVal = t['tier'] as int;
+                  final label = t['label'] as String;
+                  final isSel = _puzzleTier == tierVal;
+                  return GestureDetector(
+                    onTap: () {
+                      if (_puzzleTier != tierVal) {
+                        setState(() => _puzzleTier = tierVal);
+                        _loadPuzzleTabPuzzle();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isSel ? AppColors.surfacePanel : AppColors.surfaceCard,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSel ? AppColors.amber.withValues(alpha: 0.8) : AppColors.border,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            color: isSel ? AppColors.amber : AppColors.textMuted,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
+          // Status & Turn Banner
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceCard,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _puzzleSolved
+                    ? AppColors.green.withValues(alpha: 0.5)
+                    : _puzzleStatusColor == AppColors.red
+                        ? AppColors.red.withValues(alpha: 0.5)
+                        : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isWhiteTurn ? Colors.white : const Color(0xFF202020),
+                    border: Border.all(color: AppColors.border, width: 1.5),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _puzzleStatusMsg,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: _puzzleStatusColor,
+                    ),
+                  ),
+                ),
+                if (_puzzleLoading)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.amber),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Interactive Chess Board
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 390),
             child: ChessBoardWidget(
-              fen: _tacticsFen,
-              orientation: PieceColor.white,
-              turn: _tacticsTurn,
-              lastMove: _tacticsLastMove,
-              interactive: !_tacticsSolved,
-              onMove: _onTacticsMove,
+              fen: _puzzleFen,
+              orientation: _puzzleOrientation,
+              turn: _puzzleTurn,
+              playerColor: _puzzlePlayerColor,
+              lastMove: _puzzleLastMove,
+              hintSquare: _puzzleHintSquare,
+              hintTarget: _puzzleHintTarget,
+              interactive: !_puzzleSolved && !_puzzleIsSolutionRevealed && !_puzzleIsOpponentReplying,
+              onMove: _onPuzzleMove,
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Tactical Control Bar
+          if (_puzzleSolved) ...[
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.textPrimary,
+                        foregroundColor: AppColors.background,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _nextPuzzle,
+                      icon: const AppIcon(name: 'arrow-right', size: 16, color: AppColors.background),
+                      label: const Text('Next Puzzle', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _resetPuzzle,
+                  icon: const AppIcon(name: 'rotate-ccw', size: 18, color: AppColors.textPrimary),
+                  tooltip: 'Retry Position',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfaceCard,
+                    minimumSize: const Size(46, 46),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _analysisFen = _puzzleFen;
+                      _currentTabIndex = 3; // Switch to Analysis Tab
+                    });
+                    _evaluateCurrentAnalysisPosition();
+                  },
+                  icon: const AppIcon(name: 'search', size: 18, color: AppColors.amber),
+                  tooltip: 'Analyze Position',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfaceCard,
+                    minimumSize: const Size(46, 46),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: AppColors.surfaceCard,
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _puzzleIsSolutionRevealed ? null : _requestPuzzleHint,
+                      icon: const AppIcon(name: 'sparkles', size: 14, color: AppColors.amber),
+                      label: Text(
+                        _puzzleHintCount == 0 ? 'Hint' : 'Target',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: SizedBox(
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: AppColors.surfaceCard,
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _puzzleIsSolutionRevealed ? null : _revealPuzzleSolution,
+                      icon: const AppIcon(name: 'eye', size: 14, color: AppColors.textMuted),
+                      label: const Text(
+                        'Solution',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: _resetPuzzle,
+                  icon: const AppIcon(name: 'rotate-ccw', size: 16, color: AppColors.textMuted),
+                  tooltip: 'Reset Board',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfaceCard,
+                    minimumSize: const Size(42, 42),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: _nextPuzzle,
+                  icon: const AppIcon(name: 'chevrons-right', size: 16, color: AppColors.textMuted),
+                  tooltip: 'Skip Puzzle',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfaceCard,
+                    minimumSize: const Size(42, 42),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 14),
 
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.surfaceCard,
-                foregroundColor: AppColors.textPrimary,
-                elevation: 0,
-                side: const BorderSide(color: AppColors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () {
-                setState(() {
-                  _tacticsFen = 'r1bqk2r/pppp1ppp/2n5/4p3/1bB1n3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 2 6';
-                  _tacticsSolved = false;
-                  _tacticsStatus = 'Next Puzzle: White to move.';
-                  _tacticsLastMove = null;
-                });
-              },
-              child: const Text('Next Puzzle', style: TextStyle(fontWeight: FontWeight.bold)),
+          // Puzzle Details & Meta Card
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfacePanel,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Text(
+                        puzzleCategory,
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.amber),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Rating: $puzzleRating',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+                Text(
+                  _puzzleMode == 'daily'
+                      ? "Today's Daily"
+                      : _puzzleMode == 'weekly'
+                          ? 'Challenge ${_puzzleWeeklyIndex + 1} of ${_puzzleWeeklyList.isNotEmpty ? _puzzleWeeklyList.length : 7}'
+                          : '$_puzzleSolvedToday solved today',
+                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _puzzleModeButton({
+    required String mode,
+    required String label,
+    required String icon,
+    String? badge,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.textPrimary : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AppIcon(
+              name: icon,
+              size: 14,
+              color: isSelected ? AppColors.background : AppColors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? AppColors.background : AppColors.textMuted,
+              ),
+            ),
+            if (badge != null) ...[
+              const SizedBox(width: 4),
+              Text(
+                '($badge)',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                  color: isSelected ? AppColors.background.withValues(alpha: 0.8) : AppColors.textMuted,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1963,123 +2860,332 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ] else ...[
-            // Logged Out / Auth Form
+            // Logged Out / Elevated Studio Noir Auth Card
             Container(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               decoration: BoxDecoration(
                 color: AppColors.surfaceCard,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: AppColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Toggle Login / Register
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => _isLoginMode = true),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              color: _isLoginMode ? AppColors.surfacePanel : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              border: _isLoginMode ? Border.all(color: AppColors.border) : null,
-                            ),
-                            child: Center(
-                              child: Text(
-                                'Sign In',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _isLoginMode ? AppColors.textPrimary : AppColors.textMuted),
-                              ),
-                            ),
-                          ),
+                  // Brand Emblem
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfacePanel,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.amber.withValues(alpha: 0.15),
+                          blurRadius: 20,
+                          offset: const Offset(0, 4),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => _isLoginMode = false),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              color: !_isLoginMode ? AppColors.surfacePanel : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              border: !_isLoginMode ? Border.all(color: AppColors.border) : null,
-                            ),
-                            child: Center(
-                              child: Text(
-                                'Create Account',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: !_isLoginMode ? AppColors.textPrimary : AppColors.textMuted),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    child: const Center(
+                      child: AppIcon(name: 'crown', size: 26, color: AppColors.amber),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Title & Subtitle
+                  Text(
+                    _isLoginMode ? 'Welcome Back' : 'Create Account',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isLoginMode
+                        ? 'Sign in to sync your official Elo, rated games, and tactical progression.'
+                        : 'Join the zero-latency chess arena with official ratings.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.3),
                   ),
                   const SizedBox(height: 16),
 
+                  // Value Proposition Pills
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _authFeaturePill('zap', '0ms Moves'),
+                      _authFeaturePill('trophy', 'Official Elo'),
+                      _authFeaturePill('puzzle', 'Daily Tactics'),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Segmented Switcher (Sign In vs Create Account)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfacePanel,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              _isLoginMode = true;
+                              _authError = '';
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _isLoginMode ? AppColors.textPrimary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Sign In',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: _isLoginMode ? AppColors.background : AppColors.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              _isLoginMode = false;
+                              _authError = '';
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !_isLoginMode ? AppColors.textPrimary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Create Account',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: !_isLoginMode ? AppColors.background : AppColors.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Username Input
                   TextField(
                     controller: _authUsernameCtrl,
                     style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
                     decoration: InputDecoration(
+                      prefixIcon: const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: AppIcon(name: 'user', size: 16, color: AppColors.textMuted),
+                      ),
                       labelText: 'Username',
-                      labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      hintText: 'Enter your player handle',
+                      labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.5), fontSize: 13),
                       filled: true,
                       fillColor: AppColors.surfacePanel,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                      ),
                     ),
                   ),
+
+                  // Email Input (if register)
                   if (!_isLoginMode) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: _authEmailCtrl,
+                      keyboardType: TextInputType.emailAddress,
                       style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
                       decoration: InputDecoration(
+                        prefixIcon: const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: AppIcon(name: 'mail', size: 16, color: AppColors.textMuted),
+                        ),
                         labelText: 'Email Address',
-                        labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        hintText: 'player@example.com',
+                        labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                        hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.5), fontSize: 13),
                         filled: true,
                         fillColor: AppColors.surfacePanel,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                        ),
                       ),
                     ),
                   ],
+
                   const SizedBox(height: 12),
+
+                  // Password Input with Visibility Toggle
                   TextField(
                     controller: _authPasswordCtrl,
-                    obscureText: true,
+                    obscureText: _obscurePassword,
                     style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
                     decoration: InputDecoration(
+                      prefixIcon: const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: AppIcon(name: 'lock', size: 16, color: AppColors.textMuted),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: AppIcon(
+                          name: _obscurePassword ? 'eye' : 'eye-off',
+                          size: 18,
+                          color: AppColors.textMuted,
+                        ),
+                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                        tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                      ),
                       labelText: 'Password',
-                      labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      hintText: '••••••••',
+                      labelStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.5), fontSize: 13),
                       filled: true,
                       fillColor: AppColors.surfacePanel,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+                      ),
                     ),
                   ),
+
+                  // Error Banner
                   if (_authError.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(_authError, style: const TextStyle(color: AppColors.red, fontSize: 12)),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.red.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.red.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const AppIcon(name: 'x', size: 14, color: AppColors.red),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _authError,
+                              style: const TextStyle(color: AppColors.red, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
+
+                  // Submit Button
                   SizedBox(
                     width: double.infinity,
-                    height: 44,
+                    height: 48,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.textPrimary,
                         foregroundColor: AppColors.background,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       onPressed: _isAuthLoading ? null : _handleAuthSubmit,
                       child: _isAuthLoading
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.background))
-                          : Text(_isLoginMode ? 'Sign In' : 'Play Free', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ? Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.background),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  _isLoginMode ? 'Signing In...' : 'Creating Account...',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.background),
+                                ),
+                              ],
+                            )
+                          : Text(
+                              _isLoginMode ? 'Sign In' : 'Create Free Account',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
                     ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Toggle Text Link
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _isLoginMode ? "Don't have an account?" : "Already have an account?",
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _isLoginMode = !_isLoginMode;
+                          _authError = '';
+                        }),
+                        child: Text(
+                          _isLoginMode ? 'Create one free' : 'Sign In',
+                          style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -2152,6 +3258,28 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 4),
           Text(value, style: const TextStyle(fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _authFeaturePill(String icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.surfacePanel,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppIcon(name: icon, size: 12, color: AppColors.amber),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+          ),
         ],
       ),
     );
