@@ -82,10 +82,17 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _dailyPuzzle;
   String _dailyFen = initialFen;
   PieceColor _dailyTurn = PieceColor.white;
+  PieceColor _dailyPlayerColor = PieceColor.white;
+  PieceColor _dailyOrientation = PieceColor.white;
   LastMoveInfo? _dailyLastMove;
   int _dailySolutionIdx = 0;
   bool _dailySolved = false;
   bool _isDailyAnimating = false;
+  String? _dailyHintSquare;
+  String? _dailyHintTarget;
+  int _dailyHintCount = 0;
+  bool _dailyIsSolutionRevealed = false;
+  List<String> _dailySolutionMoves = [];
   String _dailyStatusMsg = "Today's Tactical Workout";
   Color _dailyStatusColor = AppColors.textMuted;
   int _selectedBotLevel = 2;
@@ -340,11 +347,13 @@ class _HomeScreenState extends State<HomeScreen> {
       final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
 
       if (p['solution'] == null || (p['solution'] as List).isEmpty) {
-        ApiClient().getPuzzleSolution(p['id']).then((solRes) {
+        ApiClient().getPuzzleSolution(p['id'].toString()).then((solRes) {
           if (solRes != null && solRes['solution'] != null) {
-            setState(() {
-              _dailyPuzzle?['solution'] = solRes['solution'];
-            });
+            if (mounted) {
+              setState(() {
+                _dailyPuzzle?['solution'] = solRes['solution'];
+              });
+            }
           }
         });
       }
@@ -353,9 +362,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _dailyPuzzle = p;
         _dailyFen = fen;
         _dailyTurn = turn;
+        _dailyPlayerColor = turn;
+        _dailyOrientation = turn; // Fixed: Orientation stays fixed, never flips on wrong move!
         _dailyLastMove = null;
         _dailySolutionIdx = 0;
         _dailySolved = false;
+        _dailyHintSquare = null;
+        _dailyHintTarget = null;
+        _dailyHintCount = 0;
+        _dailyIsSolutionRevealed = false;
+        _dailySolutionMoves = [];
         _dailyStatusMsg = "Today's Tactical Workout";
         _dailyStatusColor = AppColors.textMuted;
       });
@@ -363,9 +379,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onDailyMove(String from, String to, String? promo) {
-    if (_dailySolved || _isDailyAnimating || _dailyPuzzle == null) return;
+    if (_dailySolved || _isDailyAnimating || _dailyPuzzle == null || _dailyIsSolutionRevealed) return;
+    if (_dailyTurn != _dailyPlayerColor) return;
 
-    final uci = '$from$to${promo ?? ''}';
+    final uci = '$from$to${promo?.toLowerCase() ?? ''}';
     final solution = _dailyPuzzle!['solution'] as List?;
     final expectedMove = (solution != null && solution.length > _dailySolutionIdx)
         ? solution[_dailySolutionIdx] as String
@@ -387,6 +404,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _dailyTurn = res['turn'];
           _dailyLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
           _dailySolutionIdx++;
+          _dailyHintSquare = null;
+          _dailyHintTarget = null;
+          _dailyHintCount = 0;
         });
 
         if (solution != null && _dailySolutionIdx >= solution.length) {
@@ -412,6 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final oppPromo = oppUci.length > 4 ? oppUci.substring(4, 5) : null;
 
           Future.delayed(const Duration(milliseconds: 380), () {
+            if (!mounted) return;
             final oppRes = ChessEngine.executeMove(
               _dailyFen,
               oppFrom,
@@ -462,10 +483,13 @@ class _HomeScreenState extends State<HomeScreen> {
         });
 
         Future.delayed(const Duration(milliseconds: 800), () {
+          if (!mounted) return;
           setState(() {
             _dailyFen = prevFen;
             _dailyTurn = prevTurn;
             _dailyLastMove = prevLast;
+            _dailyHintSquare = null;
+            _dailyHintTarget = null;
             _dailyStatusMsg = 'Not the best move. Try again!';
             _dailyStatusColor = AppColors.textMuted;
             _isDailyAnimating = false;
@@ -479,6 +503,175 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+  }
+
+  Future<void> _requestDailyHint() async {
+    if (_dailyPuzzle == null || _dailySolved || _dailyIsSolutionRevealed) return;
+    String? fromSq;
+    String? toSq;
+
+    final solList = _dailyPuzzle!['solution'] as List?;
+    if (solList != null && _dailySolutionIdx < solList.length) {
+      final uci = solList[_dailySolutionIdx].toString();
+      if (uci.length >= 4) {
+        fromSq = uci.substring(0, 2).toLowerCase();
+        toSq = uci.substring(2, 4).toLowerCase();
+      }
+    }
+
+    if (fromSq == null || toSq == null) {
+      final hint = await ApiClient().getPuzzleHint(
+        _dailyPuzzle!['id'].toString(),
+        plyIndex: _dailySolutionIdx,
+      );
+      if (hint != null && hint['from'] != null) {
+        fromSq = hint['from'].toString().toLowerCase();
+        toSq = hint['to']?.toString().toLowerCase();
+      }
+    }
+
+    if (!mounted) return;
+
+    if (fromSq != null) {
+      if (_dailyHintCount == 0) {
+        setState(() {
+          _dailyHintSquare = fromSq;
+          _dailyHintTarget = null;
+          _dailyStatusMsg = 'Tactical Hint: Focus on the piece on ${fromSq!.toUpperCase()}!';
+          _dailyStatusColor = AppColors.textPrimary;
+          _dailyHintCount = 1;
+        });
+      } else {
+        setState(() {
+          _dailyHintSquare = fromSq;
+          _dailyHintTarget = toSq;
+          _dailyStatusMsg = toSq != null
+              ? 'Direct Hint: Move piece to ${toSq.toUpperCase()}!'
+              : 'Direct Hint: Focus on ${fromSq!.toUpperCase()}!';
+          _dailyStatusColor = AppColors.textPrimary;
+        });
+      }
+    } else {
+      setState(() {
+        _dailyStatusMsg = 'No hint available for this position.';
+      });
+    }
+  }
+
+  Future<void> _revealDailySolution() async {
+    if (_dailyPuzzle == null) return;
+    final initialFenStr = _dailyPuzzle!['fen'] as String;
+    final parts = initialFenStr.split(' ');
+    final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+
+    setState(() {
+      _dailyIsSolutionRevealed = true;
+      _isDailyAnimating = false;
+      _dailyFen = initialFenStr;
+      _dailyTurn = turn;
+      _dailyPlayerColor = turn;
+      _dailyOrientation = turn;
+      _dailyLastMove = null;
+      _dailyHintSquare = null;
+      _dailyHintTarget = null;
+      _dailyHintCount = 0;
+      _dailySolutionIdx = 0;
+      _dailyStatusMsg = 'Solution revealed. Playing through winning moves...';
+      _dailyStatusColor = AppColors.textPrimary;
+    });
+
+    List<String> moves = [];
+    if (_dailyPuzzle!['solution'] != null && (_dailyPuzzle!['solution'] as List).isNotEmpty) {
+      moves = List<String>.from(_dailyPuzzle!['solution'] as List);
+    } else {
+      final sol = await ApiClient().getPuzzleSolution(_dailyPuzzle!['id'].toString());
+      if (sol != null && sol['solution'] != null) {
+        moves = List<String>.from(sol['solution'] as List);
+        _dailyPuzzle!['solution'] = moves;
+      }
+    }
+
+    if (!mounted || !_dailyIsSolutionRevealed) return;
+
+    if (moves.isEmpty) {
+      setState(() {
+        _dailyIsSolutionRevealed = false;
+        _dailyStatusMsg = 'Unable to fetch solution.';
+        _dailyStatusColor = AppColors.red;
+      });
+      return;
+    }
+
+    _dailySolutionMoves = moves;
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _dailyIsSolutionRevealed) {
+        _playDailySolutionStep(0);
+      }
+    });
+  }
+
+  void _playDailySolutionStep(int idx) {
+    if (!mounted || !_dailyIsSolutionRevealed) return;
+    if (idx >= _dailySolutionMoves.length) {
+      setState(() {
+        _dailyStatusMsg = 'Solution complete! Review the tactical pattern.';
+        _dailyStatusColor = AppColors.green;
+      });
+      return;
+    }
+
+    final moveUci = _dailySolutionMoves[idx];
+    final from = moveUci.substring(0, 2);
+    final to = moveUci.substring(2, 4);
+    final promo = moveUci.length > 4 ? moveUci.substring(4, 5) : null;
+
+    final res = ChessEngine.executeMove(_dailyFen, from, to, promotion: promo);
+    if (res != null && res['valid'] == true) {
+      final san = res['san'] as String;
+      final isCap = res['isCapture'] as bool;
+      SoundEffects().playMoveSound(san: san, isCapture: isCap);
+      final isMate = res['isCheckmate'] == true;
+      setState(() {
+        _dailyFen = res['newFen'] as String;
+        _dailyTurn = res['turn'] as PieceColor;
+        _dailyLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
+        if (idx + 1 >= _dailySolutionMoves.length) {
+          _dailyStatusMsg = isMate
+              ? 'Solution complete: Decisive checkmate delivered!'
+              : 'Solution complete! Review the tactical pattern.';
+          _dailyStatusColor = AppColors.green;
+        }
+      });
+    }
+
+    if (idx + 1 < _dailySolutionMoves.length) {
+      Future.delayed(const Duration(milliseconds: 600), () {
+        _playDailySolutionStep(idx + 1);
+      });
+    }
+  }
+
+  void _resetDailyPuzzle() {
+    if (_dailyPuzzle == null) return;
+    final fen = _dailyPuzzle!['fen'] as String;
+    final parts = fen.split(' ');
+    final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+    setState(() {
+      _dailyFen = fen;
+      _dailyTurn = turn;
+      _dailyPlayerColor = turn;
+      _dailyOrientation = turn;
+      _dailySolutionIdx = 0;
+      _dailySolved = false;
+      _isDailyAnimating = false;
+      _dailyIsSolutionRevealed = false;
+      _dailyHintSquare = null;
+      _dailyHintTarget = null;
+      _dailyHintCount = 0;
+      _dailyLastMove = null;
+      _dailyStatusMsg = "Position reset. Find the optimal combination!";
+      _dailyStatusColor = AppColors.textPrimary;
+    });
   }
 
   // ==========================================
@@ -1584,48 +1777,95 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _requestPuzzleHint() async {
     if (_puzzleData == null || _puzzleSolved || _puzzleIsSolutionRevealed) return;
     setState(() => _puzzleHasAssistance = true);
-    final hint = await ApiClient().getPuzzleHint(
-      _puzzleData!['id'].toString(),
-      plyIndex: _puzzleSolutionIdx,
-    );
-    if (hint != null && hint['from'] != null) {
+
+    String? fromSq;
+    String? toSq;
+
+    // 1. Try local solution first for instant 0ms latency
+    final solList = _puzzleData!['solution'] as List?;
+    if (solList != null && _puzzleSolutionIdx < solList.length) {
+      final uci = solList[_puzzleSolutionIdx].toString();
+      if (uci.length >= 4) {
+        fromSq = uci.substring(0, 2).toLowerCase();
+        toSq = uci.substring(2, 4).toLowerCase();
+      }
+    }
+
+    // 2. Fallback to API if not in local cache
+    if (fromSq == null || toSq == null) {
+      final hint = await ApiClient().getPuzzleHint(
+        _puzzleData!['id'].toString(),
+        plyIndex: _puzzleSolutionIdx,
+      );
+      if (hint != null && hint['from'] != null) {
+        fromSq = hint['from'].toString().toLowerCase();
+        toSq = hint['to']?.toString().toLowerCase();
+      } else {
+        final solRes = await ApiClient().getPuzzleSolution(_puzzleData!['id'].toString());
+        if (solRes != null && solRes['solution'] != null) {
+          final list = solRes['solution'] as List;
+          _puzzleData!['solution'] = list;
+          if (_puzzleSolutionIdx < list.length) {
+            final uci = list[_puzzleSolutionIdx].toString();
+            if (uci.length >= 4) {
+              fromSq = uci.substring(0, 2).toLowerCase();
+              toSq = uci.substring(2, 4).toLowerCase();
+            }
+          }
+        }
+      }
+    }
+
+    if (!mounted) return;
+
+    if (fromSq != null) {
       if (_puzzleHintCount == 0) {
+        // Level 1: Piece starting square
         setState(() {
-          _puzzleHintSquare = hint['from'].toString().toLowerCase();
-          _puzzleStatusMsg = 'Tactical Hint: Focus on the piece on ${hint['from'].toString().toUpperCase()}!';
+          _puzzleHintSquare = fromSq;
+          _puzzleHintTarget = null;
+          _puzzleStatusMsg = 'Tactical Hint: Focus on the piece on ${fromSq!.toUpperCase()}!';
           _puzzleStatusColor = AppColors.textPrimary;
           _puzzleHintCount = 1;
         });
       } else {
+        // Level 2: Target destination square
         setState(() {
-          _puzzleHintSquare = hint['from'].toString().toLowerCase();
-          _puzzleHintTarget = hint['to'].toString().toLowerCase();
-          _puzzleStatusMsg = 'Direct Hint: Move piece to ${hint['to'].toString().toUpperCase()}!';
+          _puzzleHintSquare = fromSq;
+          _puzzleHintTarget = toSq;
+          _puzzleStatusMsg = toSq != null
+              ? 'Direct Hint: Move piece to ${toSq.toUpperCase()}!'
+              : 'Direct Hint: Focus on ${fromSq!.toUpperCase()}!';
           _puzzleStatusColor = AppColors.textPrimary;
         });
       }
     } else {
       setState(() {
-        _puzzleStatusMsg = 'No hint available for this position.';
+        _puzzleStatusMsg = 'Could not retrieve hint for this position.';
       });
     }
   }
 
   Future<void> _revealPuzzleSolution() async {
     if (_puzzleData == null) return;
+    final initialFenStr = _puzzleData!['fen'] as String;
+    final parts = initialFenStr.split(' ');
+    final turn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+
     setState(() {
       _puzzleHasAssistance = true;
       _puzzleIsSolutionRevealed = true;
       _puzzleIsOpponentReplying = false;
-      _puzzleFen = _puzzleData!['fen'] as String;
+      _puzzleFen = initialFenStr;
+      _puzzleTurn = turn;
+      _puzzlePlayerColor = turn;
+      _puzzleOrientation = turn;
       _puzzleLastMove = null;
       _puzzleHintSquare = null;
       _puzzleHintTarget = null;
-      final parts = _puzzleFen.split(' ');
-      _puzzleTurn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
-      _puzzlePlayerColor = _puzzleTurn;
+      _puzzleHintCount = 0;
       _puzzleSolutionIdx = 0;
-      _puzzleStatusMsg = 'Solution revealed. Playing through the winning moves...';
+      _puzzleStatusMsg = 'Solution revealed. Playing through winning moves...';
       _puzzleStatusColor = AppColors.textPrimary;
     });
 
@@ -1639,15 +1879,31 @@ class _HomeScreenState extends State<HomeScreen> {
         _puzzleData!['solution'] = moves;
       }
     }
+
+    if (!mounted || !_puzzleIsSolutionRevealed) return;
+
+    if (moves.isEmpty) {
+      setState(() {
+        _puzzleIsSolutionRevealed = false;
+        _puzzleStatusMsg = 'Unable to fetch solution for this puzzle.';
+        _puzzleStatusColor = AppColors.red;
+      });
+      return;
+    }
+
     _puzzleSolutionMoves = moves;
-    _playSolutionStep(0);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _puzzleIsSolutionRevealed) {
+        _playSolutionStep(0);
+      }
+    });
   }
 
   void _playSolutionStep(int idx) {
     if (!mounted || !_puzzleIsSolutionRevealed) return;
     if (idx >= _puzzleSolutionMoves.length) {
       setState(() {
-        _puzzleStatusMsg = 'Solution playback complete. Review the tactical pattern.';
+        _puzzleStatusMsg = 'Solution complete! Review the tactical pattern.';
         _puzzleStatusColor = AppColors.green;
       });
       return;
@@ -1663,21 +1919,23 @@ class _HomeScreenState extends State<HomeScreen> {
       final san = res['san'] as String;
       final isCap = res['isCapture'] as bool;
       SoundEffects().playMoveSound(san: san, isCapture: isCap);
+      final isMate = res['isCheckmate'] == true;
       setState(() {
         _puzzleFen = res['newFen'] as String;
         _puzzleTurn = res['turn'] as PieceColor;
         _puzzleLastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
+        if (idx + 1 >= _puzzleSolutionMoves.length) {
+          _puzzleStatusMsg = isMate
+              ? 'Solution complete: Decisive checkmate delivered!'
+              : 'Solution complete! Review the tactical pattern.';
+          _puzzleStatusColor = AppColors.green;
+        }
       });
     }
 
     if (idx + 1 < _puzzleSolutionMoves.length) {
-      Future.delayed(const Duration(milliseconds: 650), () {
+      Future.delayed(const Duration(milliseconds: 600), () {
         _playSolutionStep(idx + 1);
-      });
-    } else {
-      setState(() {
-        _puzzleStatusMsg = 'Solution complete! Review the tactical pattern.';
-        _puzzleStatusColor = AppColors.green;
       });
     }
   }
@@ -1691,11 +1949,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _puzzleFen = fen;
       _puzzleTurn = turn;
       _puzzlePlayerColor = turn;
+      _puzzleOrientation = turn;
       _puzzleSolutionIdx = 0;
       _puzzleSolved = false;
       _puzzleIsRetrying = true;
       _puzzleHintSquare = null;
       _puzzleHintTarget = null;
+      _puzzleHintCount = 0;
       _puzzleLastMove = null;
       _puzzleIsSolutionRevealed = false;
       _puzzleIsOpponentReplying = false;
@@ -2169,13 +2429,132 @@ class _HomeScreenState extends State<HomeScreen> {
             constraints: const BoxConstraints(maxHeight: 380),
             child: ChessBoardWidget(
               fen: _dailyFen,
-              orientation: _dailyTurn,
+              orientation: _dailyOrientation,
               turn: _dailyTurn,
+              playerColor: _dailyPlayerColor,
               lastMove: _dailyLastMove,
-              interactive: !_dailySolved && !_isDailyAnimating,
+              hintSquare: _dailyHintSquare,
+              hintTarget: _dailyHintTarget,
+              interactive: !_dailySolved && !_isDailyAnimating && !_dailyIsSolutionRevealed,
               onMove: _onDailyMove,
             ),
           ),
+          const SizedBox(height: 12),
+          if (_dailySolved || _dailyIsSolutionRevealed) ...[
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.textPrimary,
+                        foregroundColor: AppColors.background,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => setState(() => _currentTabIndex = 1),
+                      icon: const AppIcon(name: 'puzzle', size: 14, color: AppColors.background),
+                      label: const Text('More Puzzles', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _resetDailyPuzzle,
+                  icon: const AppIcon(name: 'rotate-ccw', size: 16, color: AppColors.textPrimary),
+                  tooltip: 'Retry Puzzle',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfacePanel,
+                    minimumSize: const Size(40, 40),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _analysisFen = _dailyFen;
+                      _currentTabIndex = 3;
+                    });
+                    _evaluateCurrentAnalysisPosition();
+                  },
+                  icon: const AppIcon(name: 'search', size: 16, color: AppColors.textPrimary),
+                  tooltip: 'Analyze',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfacePanel,
+                    minimumSize: const Size(40, 40),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: AppColors.surfacePanel,
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _dailyIsSolutionRevealed ? null : _requestDailyHint,
+                      icon: const AppIcon(name: 'sparkles', size: 13, color: AppColors.textPrimary),
+                      label: Text(
+                        _dailyHintCount == 0 ? 'Hint' : 'Target',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: AppColors.surfacePanel,
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _dailyIsSolutionRevealed ? null : _revealDailySolution,
+                      icon: const AppIcon(name: 'eye', size: 13, color: AppColors.textMuted),
+                      label: const Text(
+                        'Solution',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: _resetDailyPuzzle,
+                  icon: const AppIcon(name: 'rotate-ccw', size: 15, color: AppColors.textMuted),
+                  tooltip: 'Reset',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.surfacePanel,
+                    minimumSize: const Size(38, 38),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -2848,14 +3227,14 @@ class _HomeScreenState extends State<HomeScreen> {
               lastMove: _puzzleLastMove,
               hintSquare: _puzzleHintSquare,
               hintTarget: _puzzleHintTarget,
-              interactive: !_puzzleSolved && !_puzzleIsSolutionRevealed && !_puzzleIsOpponentReplying,
+              interactive: !_puzzleSolved && !_puzzleIsSolutionRevealed && !_puzzleIsOpponentReplying && !_puzzleIsRetrying,
               onMove: _onPuzzleMove,
             ),
           ),
           const SizedBox(height: 12),
 
           // Tactical Control Bar
-          if (_puzzleSolved) ...[
+          if (_puzzleSolved || _puzzleIsSolutionRevealed) ...[
             Row(
               children: [
                 Expanded(
