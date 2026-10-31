@@ -146,4 +146,35 @@ class ChessEngine {
       return null;
     }
   }
+
+  static List<Map<String, dynamic>> parsePgn(String pgn) {
+    if (pgn.trim().isEmpty) return const [];
+    try {
+      final chess = chess_lib.Chess();
+      final ok = chess.load_pgn(pgn);
+      if (!ok) return const [];
+      final verboseHistory = chess.getHistory({'verbose': true});
+
+      final replay = chess_lib.Chess();
+      final movesList = <Map<String, dynamic>>[];
+      for (final item in verboseHistory) {
+        if (item is Map) {
+          final from = item['from']?.toString() ?? '';
+          final to = item['to']?.toString() ?? '';
+          final san = item['san']?.toString() ?? '';
+          final promo = item['promotion']?.toString();
+          replay.move({'from': from, 'to': to, 'promotion': promo});
+          movesList.add({
+            'from': from,
+            'to': to,
+            'san': san,
+            'fen': replay.fen,
+          });
+        }
+      }
+      return movesList;
+    } catch (_) {
+      return const [];
+    }
+  }
 }

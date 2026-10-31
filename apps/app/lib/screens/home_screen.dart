@@ -10,8 +10,10 @@ import '../widgets/app_icon.dart';
 import '../widgets/navigation_dock.dart';
 import '../theme/app_theme.dart';
 import '../api/api_client.dart';
+import '../chess/game_archive.dart';
 import 'bot_game_screen.dart';
 import 'game_screen.dart';
+import 'pass_and_play_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -287,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _cancelMatchmaking();
           final gameId = status['gameId']?.toString() ?? '';
           if (gameId.isNotEmpty && mounted) {
-            Navigator.of(context).push(
+            final analyze = await Navigator.of(context).push<bool>(
               MaterialPageRoute(
                 builder: (_) => GameScreen(
                   gameId: gameId,
@@ -296,6 +298,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             );
+            if (analyze == true) {
+              _loadLastPlayedGameIntoAnalysis();
+            }
           }
         }
       });
@@ -638,9 +643,620 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ==========================================
-  // PUZZLES TAB LOGIC
-  // ==========================================
+  void _loadLastPlayedGameIntoAnalysis([SavedGameRecord? record]) {
+    final game = record ?? GameArchive.lastPlayedGame;
+    if (game == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No saved game available yet. Complete a match first!'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _currentTabIndex = 3;
+      _analysisHistory.clear();
+      _analysisHistory.addAll(game.moves);
+
+      if (_analysisHistory.isNotEmpty) {
+        _jumpToPly(_analysisHistory.length);
+      } else {
+        _analysisFen = game.finalFen.isNotEmpty ? game.finalFen : initialFen;
+        final parts = _analysisFen.split(' ');
+        _analysisTurn = parts.length > 1 && parts[1] == 'w' ? PieceColor.white : PieceColor.black;
+        _analysisCurrentPly = 0;
+        _analysisLastMove = null;
+        _triggerAnalysisEvaluation();
+      }
+
+      final myName = _currentUser?['username']?.toString().toLowerCase();
+      if (myName != null && game.blackPlayer.toLowerCase().contains(myName)) {
+        _analysisOrientation = PieceColor.black;
+      } else {
+        _analysisOrientation = PieceColor.white;
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Loaded ${game.title} into Analysis Studio'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _loadPgnIntoAnalysis(String pgn, {String? whiteName, String? blackName, String? title}) {
+    final moves = ChessEngine.parsePgn(pgn);
+    if (moves.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not parse any valid moves from PGN')),
+      );
+      return;
+    }
+
+    setState(() {
+      _currentTabIndex = 3;
+      _analysisHistory.clear();
+      _analysisHistory.addAll(moves);
+      _jumpToPly(_analysisHistory.length);
+
+      final myName = _currentUser?['username']?.toString().toLowerCase();
+      if (myName != null && blackName != null && blackName.toLowerCase().contains(myName)) {
+        _analysisOrientation = PieceColor.black;
+      } else {
+        _analysisOrientation = PieceColor.white;
+      }
+    });
+
+    GameArchive.saveGame(SavedGameRecord(
+      title: title ?? 'Imported PGN',
+      mode: 'PGN Review',
+      date: DateTime.now().toLocal().toString().substring(0, 16),
+      whitePlayer: whiteName ?? 'White',
+      blackPlayer: blackName ?? 'Black',
+      result: '*',
+      finalFen: moves.last['fen'] as String,
+      moves: moves,
+      pgn: pgn,
+    ));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Loaded ${moves.length} moves into Analysis Studio')),
+    );
+  }
+
+  void _showGameExplorerModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        int selectedTab = 0; // 0: Recent/Saved, 1: Account Games, 2: Import PGN/FEN
+        final pgnCtrl = TextEditingController();
+        bool loadingGameId = false;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.78,
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceCard,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border(top: BorderSide(color: AppColors.border, width: 1.5)),
+              ),
+              child: Column(
+                children: [
+                  // Modal handle
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 10, bottom: 8),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.border,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            AppIcon(name: 'download', size: 20, color: AppColors.textPrimary),
+                            SizedBox(width: 10),
+                            Text(
+                              'Game Explorer',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const AppIcon(name: 'x', size: 18, color: AppColors.textMuted),
+                          onPressed: () => Navigator.of(ctx).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Tabs
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfacePanel,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedTab = 0),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: selectedTab == 0 ? AppColors.textPrimary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Recent Saved (${GameArchive.recentGames.length})',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: selectedTab == 0 ? AppColors.background : AppColors.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedTab = 1),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: selectedTab == 1 ? AppColors.textPrimary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'My Account',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: selectedTab == 1 ? AppColors.background : AppColors.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedTab = 2),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: selectedTab == 2 ? AppColors.textPrimary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  'Import PGN',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: selectedTab == 2 ? AppColors.background : AppColors.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Divider(color: AppColors.borderSubtle, height: 16),
+
+                  // Tab Views
+                  Expanded(
+                    child: selectedTab == 0
+                        ? _buildRecentSavedTab(ctx)
+                        : selectedTab == 1
+                            ? _buildAccountGamesTab(ctx, loadingGameId, (loading) {
+                                setModalState(() => loadingGameId = loading);
+                              })
+                            : _buildImportPgnTab(ctx, pgnCtrl),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRecentSavedTab(BuildContext modalCtx) {
+    final recent = GameArchive.recentGames;
+    if (recent.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: AppColors.surfacePanel,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Center(
+                  child: AppIcon(name: 'clock', size: 24, color: AppColors.textMuted),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'No saved matches yet',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Play a match in Online, Pass & Play, or Bot sparring to analyze it here anytime.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      itemCount: recent.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, idx) {
+        final g = recent[idx];
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surfacePanel,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            g.mode,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(g.date, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${g.whitePlayer} vs ${g.blackPlayer}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${g.result} • ${g.moves.length} moves played',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.textPrimary,
+                  foregroundColor: AppColors.background,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () {
+                  Navigator.of(modalCtx).pop();
+                  _loadLastPlayedGameIntoAnalysis(g);
+                },
+                child: const Text('Analyze', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAccountGamesTab(BuildContext modalCtx, bool loading, Function(bool) setLoading) {
+    if (_currentUser == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AppIcon(name: 'user', size: 36, color: AppColors.textMuted),
+              const SizedBox(height: 12),
+              const Text('Account Not Signed In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              const Text('Sign in to view and analyze your server match history.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              const SizedBox(height: 14),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.textPrimary,
+                  foregroundColor: AppColors.background,
+                ),
+                onPressed: () {
+                  Navigator.of(modalCtx).pop();
+                  setState(() => _currentTabIndex = 4); // Profile / Auth tab
+                },
+                child: const Text('Go to Sign In'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final userId = _currentUser?['id']?.toString();
+    return FutureBuilder<List<dynamic>>(
+      future: ApiClient().listGames(userId: userId, limit: 20),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting || loading) {
+          return const Center(child: CircularProgressIndicator(color: AppColors.textPrimary));
+        }
+
+        final games = snapshot.data ?? [];
+        if (games.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text(
+                'No server games found for this account.\nPlay a live match to see it listed here!',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+              ),
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          itemCount: games.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, idx) {
+            final gm = games[idx] as Map<String, dynamic>;
+            final gid = gm['id']?.toString() ?? '';
+            final whiteUser = gm['white'] is Map ? gm['white']['username']?.toString() : 'White';
+            final blackUser = gm['black'] is Map ? gm['black']['username']?.toString() : 'Black';
+            final timeControl = '${(gm['initialTime'] ?? 600) ~/ 60}+${gm['increment'] ?? 0}';
+            final result = gm['result']?.toString() ?? gm['status']?.toString() ?? '*';
+            final date = gm['createdAt']?.toString().split('T').first ?? '';
+
+            return Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surfacePanel,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                timeControl,
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(date, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '$whiteUser vs $blackUser',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Result: $result',
+                          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.textPrimary,
+                      foregroundColor: AppColors.background,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () async {
+                      setLoading(true);
+                      try {
+                        final pgn = await ApiClient().getGamePgn(gid);
+                        if (pgn != null && pgn.isNotEmpty) {
+                          if (modalCtx.mounted) {
+                            Navigator.of(modalCtx).pop();
+                          }
+                          _loadPgnIntoAnalysis(
+                            pgn,
+                            whiteName: whiteUser,
+                            blackName: blackUser,
+                            title: '$whiteUser vs $blackUser',
+                          );
+                        } else {
+                          // Try getting game moves directly
+                          final gameData = await ApiClient().getGame(gid);
+                          final movesList = gameData['moves'] as List?;
+                          if (movesList != null && movesList.isNotEmpty) {
+                            // Replay moves
+                            final pgnMoves = movesList.map((m) => m['san']?.toString() ?? '').where((s) => s.isNotEmpty).join(' ');
+                            if (modalCtx.mounted) {
+                              Navigator.of(modalCtx).pop();
+                            }
+                            _loadPgnIntoAnalysis(
+                              pgnMoves,
+                              whiteName: whiteUser,
+                              blackName: blackUser,
+                              title: '$whiteUser vs $blackUser',
+                            );
+                          } else {
+                            setLoading(false);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No recorded moves found for this game')),
+                              );
+                            }
+                          }
+                        }
+                      } catch (e) {
+                        setLoading(false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to load game: $e')),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Analyze', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildImportPgnTab(BuildContext modalCtx, TextEditingController pgnCtrl) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Paste PGN or Move Notation',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Paste standard PGN format with headers, or raw SAN move sequence (e.g., "1. e4 e5 2. Nf3 Nc6").',
+            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: TextField(
+              controller: pgnCtrl,
+              maxLines: null,
+              expands: true,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: '[Event "Casual Game"]\n1. e4 e5 2. Nf3 Nc6 3. Bb5...',
+                hintStyle: const TextStyle(color: AppColors.textMuted),
+                filled: true,
+                fillColor: AppColors.surfacePanel,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textPrimary,
+                    side: const BorderSide(color: AppColors.border),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    final data = await Clipboard.getData('text/plain');
+                    if (data?.text != null) {
+                      pgnCtrl.text = data!.text!;
+                    }
+                  },
+                  child: const Text('Paste Clipboard'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.textPrimary,
+                    foregroundColor: AppColors.background,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    final text = pgnCtrl.text.trim();
+                    if (text.isNotEmpty) {
+                      Navigator.of(modalCtx).pop();
+                      _loadPgnIntoAnalysis(text);
+                    }
+                  },
+                  child: const Text('Load into Studio', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
   Future<void> _loadPuzzleTabPuzzle({String? overrideMode}) async {
     final mode = overrideMode ?? _puzzleMode;
     setState(() {
@@ -977,7 +1593,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _puzzleHintSquare = hint['from'].toString().toLowerCase();
           _puzzleStatusMsg = 'Tactical Hint: Focus on the piece on ${hint['from'].toString().toUpperCase()}!';
-          _puzzleStatusColor = AppColors.amber;
+          _puzzleStatusColor = AppColors.textPrimary;
           _puzzleHintCount = 1;
         });
       } else {
@@ -985,7 +1601,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _puzzleHintSquare = hint['from'].toString().toLowerCase();
           _puzzleHintTarget = hint['to'].toString().toLowerCase();
           _puzzleStatusMsg = 'Direct Hint: Move piece to ${hint['to'].toString().toUpperCase()}!';
-          _puzzleStatusColor = AppColors.amber;
+          _puzzleStatusColor = AppColors.textPrimary;
         });
       }
     } else {
@@ -1010,7 +1626,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _puzzlePlayerColor = _puzzleTurn;
       _puzzleSolutionIdx = 0;
       _puzzleStatusMsg = 'Solution revealed. Playing through the winning moves...';
-      _puzzleStatusColor = AppColors.amber;
+      _puzzleStatusColor = AppColors.textPrimary;
     });
 
     List<String> moves = [];
@@ -1477,10 +2093,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 0,
               ),
-              onPressed: () {
-                Navigator.of(context).push(
+              onPressed: () async {
+                final analyze = await Navigator.of(context).push<bool>(
                   MaterialPageRoute(builder: (_) => BotGameScreen(initialLevel: _selectedBotLevel)),
                 );
+                if (analyze == true) {
+                  _loadLastPlayedGameIntoAnalysis();
+                }
               },
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1600,8 +2219,13 @@ class _HomeScreenState extends State<HomeScreen> {
               side: const BorderSide(color: AppColors.border),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            onPressed: () {
-              setState(() => _currentTabIndex = 3);
+            onPressed: () async {
+              final analyze = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(builder: (_) => const PassAndPlayScreen()),
+              );
+              if (analyze == true) {
+                _loadLastPlayedGameIntoAnalysis();
+              }
             },
             child: const Text('Play Over Board', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           ),
@@ -1643,7 +2267,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                       child: Text(
                         _isCustomMode ? 'Standard Presets' : 'Custom Time Control',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.amber),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
                     ),
                   ],
@@ -1727,7 +2351,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text('Initial Time:', style: TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                            Text('$_customInitialMin min', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, color: AppColors.amber)),
+                            Text('$_customInitialMin min', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                           ],
                         ),
                         Slider(
@@ -1743,7 +2367,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text('Increment:', style: TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-                            Text('+$_customIncrementSec sec', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, color: AppColors.amber)),
+                            Text('+$_customIncrementSec sec', style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                           ],
                         ),
                         Slider(
@@ -1979,7 +2603,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: Row(
                       children: [
-                        const AppIcon(name: 'trophy', size: 14, color: AppColors.amber),
+                        const AppIcon(name: 'trophy', size: 14, color: AppColors.textPrimary),
                         const SizedBox(width: 6),
                         Text(
                           '${_userRatings['puzzles'] ?? 400} Elo',
@@ -2145,7 +2769,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: isSel ? AppColors.surfacePanel : AppColors.surfaceCard,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: isSel ? AppColors.amber.withValues(alpha: 0.8) : AppColors.border,
+                          color: isSel ? AppColors.textPrimary : AppColors.border,
                         ),
                       ),
                       child: Center(
@@ -2154,7 +2778,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                            color: isSel ? AppColors.amber : AppColors.textMuted,
+                            color: isSel ? AppColors.textPrimary : AppColors.textMuted,
                           ),
                         ),
                       ),
@@ -2206,7 +2830,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.amber),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
                   ),
               ],
             ),
@@ -2274,7 +2898,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     });
                     _evaluateCurrentAnalysisPosition();
                   },
-                  icon: const AppIcon(name: 'search', size: 18, color: AppColors.amber),
+                  icon: const AppIcon(name: 'search', size: 18, color: AppColors.textPrimary),
                   tooltip: 'Analyze Position',
                   style: IconButton.styleFrom(
                     backgroundColor: AppColors.surfaceCard,
@@ -2301,7 +2925,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       onPressed: _puzzleIsSolutionRevealed ? null : _requestPuzzleHint,
-                      icon: const AppIcon(name: 'sparkles', size: 14, color: AppColors.amber),
+                      icon: const AppIcon(name: 'sparkles', size: 14, color: AppColors.textPrimary),
                       label: Text(
                         _puzzleHintCount == 0 ? 'Hint' : 'Target',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
@@ -2384,7 +3008,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Text(
                         puzzleCategory,
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.amber),
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -2481,6 +3105,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               Row(
                 children: [
+                  IconButton(
+                    icon: const AppIcon(name: 'download', size: 16, color: AppColors.textPrimary),
+                    onPressed: _showGameExplorerModal,
+                    tooltip: 'Game Explorer (Saved & Server Games)',
+                  ),
                   IconButton(
                     icon: const AppIcon(name: 'upload', size: 16, color: AppColors.textMuted),
                     onPressed: _showLoadFenDialog,
@@ -2888,14 +3517,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       border: Border.all(color: AppColors.border),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.amber.withValues(alpha: 0.15),
+                          color: Colors.white.withValues(alpha: 0.05),
                           blurRadius: 20,
                           offset: const Offset(0, 4),
                         ),
                       ],
                     ),
                     child: const Center(
-                      child: AppIcon(name: 'crown', size: 26, color: AppColors.amber),
+                      child: AppIcon(name: 'crown', size: 26, color: AppColors.textPrimary),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -3216,7 +3845,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.border),
                     ),
-                    child: const Center(child: AppIcon(name: 'trophy', size: 22, color: AppColors.amber)),
+                    child: const Center(child: AppIcon(name: 'trophy', size: 22, color: AppColors.textPrimary)),
                   ),
                   const SizedBox(width: 14),
                   const Expanded(
@@ -3274,7 +3903,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AppIcon(name: icon, size: 12, color: AppColors.amber),
+          AppIcon(name: icon, size: 12, color: AppColors.textPrimary),
           const SizedBox(width: 6),
           Text(
             label,
@@ -3340,7 +3969,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const Row(
                     children: [
-                      AppIcon(name: 'trophy', size: 20, color: AppColors.amber),
+                      AppIcon(name: 'trophy', size: 20, color: AppColors.textPrimary),
                       SizedBox(width: 10),
                       Text('Global Leaderboard', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                     ],
@@ -3425,7 +4054,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       width: 26,
                                       height: 26,
                                       decoration: BoxDecoration(
-                                        color: rank <= 3 ? AppColors.amber.withValues(alpha: 0.15) : AppColors.surfacePanel,
+                                        color: rank <= 3 ? Colors.white.withValues(alpha: 0.12) : AppColors.surfacePanel,
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Center(
@@ -3434,7 +4063,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: rank <= 3 ? AppColors.amber : AppColors.textMuted,
+                                            color: rank <= 3 ? AppColors.textPrimary : AppColors.textMuted,
                                           ),
                                         ),
                                       ),

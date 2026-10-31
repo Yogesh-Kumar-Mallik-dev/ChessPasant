@@ -62,5 +62,16 @@ void main() {
       final castleMoves = moves.where((m) => m.isCastle).map((m) => m.to).toList();
       expect(castleMoves, containsAll(['g1', 'c1']));
     });
+
+    test('parsePgn extracts move sequence and FEN states correctly', () {
+      const pgn = '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6';
+      final parsed = ChessEngine.parsePgn(pgn);
+      expect(parsed.length, 6);
+      expect(parsed[0]['san'], 'e4');
+      expect(parsed[0]['from'], 'e2');
+      expect(parsed[0]['to'], 'e4');
+      expect(parsed[5]['san'], 'a6');
+      expect(parsed[5]['fen'], contains(' '));
+    });
   });
 }

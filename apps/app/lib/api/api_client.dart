@@ -136,6 +136,15 @@ class ApiClient {
     return res.data;
   }
 
+  Future<String?> getGamePgn(String gameId) async {
+    try {
+      final res = await _dio.get('/games/$gameId/pgn');
+      return res.data.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<dynamic>> listGames({String? userId, int limit = 10}) async {
     final query = <String, dynamic>{'limit': limit};
     if (userId != null) query['userId'] = userId;

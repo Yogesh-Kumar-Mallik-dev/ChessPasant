@@ -223,21 +223,22 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                           fit: StackFit.expand,
                           alignment: Alignment.center,
                           children: [
-                            // Last move highlight (amber aura)
+                            // Last move highlight (authentic Studio Noir monochrome tint)
                             if (isLastMoveFrom || isLastMoveTo)
                               Container(
-                                color: isLastMoveTo
-                                    ? AppColors.amber.withValues(alpha: 0.28)
-                                    : AppColors.amber.withValues(alpha: 0.20),
+                                color: (isLight ? Colors.black : Colors.white)
+                                    .withValues(alpha: isLastMoveTo ? 0.16 : 0.10),
                               ),
 
-                            // Selected square highlight with amber border
+                            // Selected square highlight with crisp monochrome border
                             if (isSelected)
                               Container(
                                 decoration: BoxDecoration(
                                   color: AppColors.boardSelected,
                                   border: Border.all(
-                                    color: AppColors.amber.withValues(alpha: 0.85),
+                                    color: isLight
+                                        ? Colors.black.withValues(alpha: 0.70)
+                                        : Colors.white.withValues(alpha: 0.85),
                                     width: 2,
                                   ),
                                 ),
@@ -262,11 +263,15 @@ class _ChessBoardWidgetState extends State<ChessBoardWidget> {
                               Container(
                                 decoration: BoxDecoration(
                                   border: Border.all(
-                                    color: isHintSquare ? AppColors.amber : AppColors.green,
+                                    color: isHintSquare
+                                        ? (isLight ? Colors.black : Colors.white)
+                                        : AppColors.green,
                                     width: 2.5,
                                   ),
-                                  color: (isHintSquare ? AppColors.amber : AppColors.green)
-                                      .withValues(alpha: 0.25),
+                                  color: (isHintSquare
+                                          ? (isLight ? Colors.black : Colors.white)
+                                          : AppColors.green)
+                                      .withValues(alpha: 0.22),
                                 ),
                               ),
 

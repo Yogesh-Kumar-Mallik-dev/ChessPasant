@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../chess/models.dart';
 import '../chess/engine.dart';
+import '../chess/game_archive.dart';
 import '../audio/sounds.dart';
 import '../widgets/chess_board.dart';
 import '../widgets/app_icon.dart';
@@ -17,11 +18,22 @@ class BotGameScreen extends StatefulWidget {
 }
 
 class _BotGameScreenState extends State<BotGameScreen> {
-  String _fen = initialFen;
-  PieceColor _turn = PieceColor.white;
+  String _liveFen = initialFen;
+  PieceColor _liveTurn = PieceColor.white;
   final PieceColor _playerColor = PieceColor.white;
-  LastMoveInfo? _lastMove;
-  final List<String> _sanHistory = [];
+  LastMoveInfo? _liveLastMove;
+
+  final List<Map<String, dynamic>> _boardHistory = [
+    {
+      'ply': 0,
+      'fen': initialFen,
+      'lastMove': null,
+      'turn': PieceColor.white,
+      'san': 'Start',
+    }
+  ];
+
+  int _viewingPly = -1; // -1 means live
   bool _isGameOver = false;
   late int _botLevel;
 
@@ -33,9 +45,14 @@ class _BotGameScreenState extends State<BotGameScreen> {
   }
 
   void _onPlayerMove(String from, String to, String? promo) {
-    if (_isGameOver || _turn != _playerColor) return;
+    if (_isGameOver || _liveTurn != _playerColor) return;
 
-    final res = ChessEngine.executeMove(_fen, from, to, promotion: promo);
+    // Immediately snap back to live mode
+    if (_viewingPly != -1) {
+      _viewingPly = -1;
+    }
+
+    final res = ChessEngine.executeMove(_liveFen, from, to, promotion: promo);
     if (res == null || res['valid'] != true) {
       SoundEffects().playIllegal();
       return;
@@ -51,18 +68,36 @@ class _BotGameScreenState extends State<BotGameScreen> {
 
     SoundEffects().playMoveSound(san: san, isCapture: isCap, isCheck: isCheck);
 
+    final moveRecord = LastMoveInfo(
+      from: from,
+      to: to,
+      san: san,
+      isCapture: isCap,
+      isPromotion: promo != null,
+    );
+
     setState(() {
-      _fen = nextFen;
-      _turn = nextTurn;
-      _lastMove = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
-      _sanHistory.add(san);
+      _liveFen = nextFen;
+      _liveTurn = nextTurn;
+      _liveLastMove = moveRecord;
+      _viewingPly = -1;
+
+      _boardHistory.add({
+        'ply': _boardHistory.length,
+        'from': from,
+        'to': to,
+        'fen': nextFen,
+        'lastMove': moveRecord,
+        'turn': nextTurn,
+        'san': san,
+      });
     });
 
     if (isCheckmate) {
-      _finishGame('Checkmate! You won.');
+      _finishGame('Checkmate! You won.', winner: 'white');
       return;
     } else if (isDraw) {
-      _finishGame('Draw by stalemate or repetition.');
+      _finishGame('Draw by stalemate or repetition.', winner: 'draw');
       return;
     }
 
@@ -71,12 +106,12 @@ class _BotGameScreenState extends State<BotGameScreen> {
   }
 
   Future<void> _triggerBotMove() async {
-    if (_isGameOver || _turn == _playerColor) return;
+    if (_isGameOver || _liveTurn == _playerColor) return;
 
     // First try backend botMove if online
     Map<String, dynamic>? botRes;
     try {
-      botRes = await ApiClient().botMove(_fen, _botLevel);
+      botRes = await ApiClient().botMove(_liveFen, _botLevel);
     } catch (_) {}
 
     String? from;
@@ -90,19 +125,19 @@ class _BotGameScreenState extends State<BotGameScreen> {
     } else {
       // Local engine fallback: calculate all legal moves and pick best / random
       final allMoves = <LegalTarget>[];
-      final board = ChessEngine.fenToBoard(_fen);
+      final board = ChessEngine.fenToBoard(_liveFen);
       for (int r = 0; r < 8; r++) {
         for (int f = 0; f < 8; f++) {
           final p = board[r][f];
-          if (p != null && p.color == _turn) {
+          if (p != null && p.color == _liveTurn) {
             final sq = '${String.fromCharCode('a'.codeUnitAt(0) + f)}${r + 1}';
-            allMoves.addAll(ChessEngine.getLegalMovesForSquare(_fen, sq));
+            allMoves.addAll(ChessEngine.getLegalMovesForSquare(_liveFen, sq));
           }
         }
       }
 
       if (allMoves.isEmpty) {
-        _finishGame('Game Over');
+        _finishGame('Game Over', winner: 'draw');
         return;
       }
 
@@ -123,7 +158,7 @@ class _BotGameScreenState extends State<BotGameScreen> {
     }
 
     if (from != null && to != null) {
-      final res = ChessEngine.executeMove(_fen, from, to, promotion: promo);
+      final res = ChessEngine.executeMove(_liveFen, from, to, promotion: promo);
       if (res != null && res['valid'] == true) {
         final san = res['san'] as String;
         final isCap = res['isCapture'] as bool;
@@ -133,24 +168,59 @@ class _BotGameScreenState extends State<BotGameScreen> {
 
         SoundEffects().playMoveSound(san: san, isCapture: isCap, isCheck: isCheck);
 
+        final moveRecord = LastMoveInfo(from: from, to: to, san: san, isCapture: isCap);
+
         setState(() {
-          _fen = res['newFen'];
-          _turn = res['turn'];
-          _lastMove = LastMoveInfo(from: from!, to: to!, san: san, isCapture: isCap);
-          _sanHistory.add(san);
+          _liveFen = res['newFen'];
+          _liveTurn = res['turn'];
+          _liveLastMove = moveRecord;
+
+          // Return immediately to live mode when bot plays!
+          _viewingPly = -1;
+
+          _boardHistory.add({
+            'ply': _boardHistory.length,
+            'from': from,
+            'to': to,
+            'fen': res['newFen'],
+            'lastMove': moveRecord,
+            'turn': res['turn'],
+            'san': san,
+          });
         });
 
         if (isCheckmate) {
-          _finishGame('Checkmate! Stockfish won.');
+          _finishGame('Checkmate! Stockfish won.', winner: 'black');
         } else if (isDraw) {
-          _finishGame('Draw by stalemate or repetition.');
+          _finishGame('Draw by stalemate or repetition.', winner: 'draw');
         }
       }
     }
   }
 
-  void _finishGame(String result) {
+  void _finishGame(String result, {required String winner}) {
     SoundEffects().playGameEnd();
+
+    final movesList = _boardHistory.skip(1).map((h) => {
+      'from': h['from'],
+      'to': h['to'],
+      'san': h['san'],
+      'fen': h['fen'],
+    }).toList();
+
+    final record = SavedGameRecord(
+      title: 'vs Bot Level $_botLevel',
+      mode: 'vs Bot',
+      date: DateTime.now().toLocal().toString().split('.')[0],
+      whitePlayer: 'You (White)',
+      blackPlayer: 'Stockfish Level $_botLevel',
+      result: winner == 'white' ? '1-0' : (winner == 'black' ? '0-1' : '1/2-1/2'),
+      finalFen: _liveFen,
+      moves: movesList,
+    );
+
+    GameArchive.saveGame(record);
+
     setState(() {
       _isGameOver = true;
     });
@@ -166,7 +236,7 @@ class _BotGameScreenState extends State<BotGameScreen> {
         ),
         title: const Row(
           children: [
-            AppIcon(name: 'trophy', size: 20, color: AppColors.amber),
+            AppIcon(name: 'trophy', size: 20, color: AppColors.textPrimary),
             SizedBox(width: 10),
             Text(
               'Match Concluded',
@@ -201,9 +271,16 @@ class _BotGameScreenState extends State<BotGameScreen> {
             ),
             onPressed: () {
               Navigator.of(ctx).pop();
-              Navigator.of(context).pop();
+              Navigator.of(context).pop(true); // Return true to trigger analysis
             },
-            child: const Text('Exit to Hub', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppIcon(name: 'search', size: 14, color: AppColors.background),
+                SizedBox(width: 6),
+                Text('Analyze Game', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
           ),
         ],
       ),
@@ -212,38 +289,69 @@ class _BotGameScreenState extends State<BotGameScreen> {
 
   void _resetGame() {
     setState(() {
-      _fen = initialFen;
-      _turn = PieceColor.white;
-      _lastMove = null;
-      _sanHistory.clear();
+      _liveFen = initialFen;
+      _liveTurn = PieceColor.white;
+      _liveLastMove = null;
+      _boardHistory.clear();
+      _boardHistory.add({
+        'ply': 0,
+        'fen': initialFen,
+        'lastMove': null,
+        'turn': PieceColor.white,
+        'san': 'Start',
+      });
+      _viewingPly = -1;
       _isGameOver = false;
     });
-    SoundEffects().playGameStart();
+  }
+
+  void _goToFirst() {
+    setState(() => _viewingPly = 0);
+  }
+
+  void _goToPrevious() {
+    final cur = _viewingPly == -1 ? _boardHistory.length - 1 : _viewingPly;
+    setState(() => _viewingPly = (cur - 1).clamp(0, _boardHistory.length - 1));
+  }
+
+  void _goToNext() {
+    if (_viewingPly == -1) return;
+    if (_viewingPly + 1 >= _boardHistory.length - 1) {
+      setState(() => _viewingPly = -1);
+    } else {
+      setState(() => _viewingPly++);
+    }
+  }
+
+  void _goToLive() {
+    setState(() => _viewingPly = -1);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isLiveView = _viewingPly == -1 || _viewingPly == _boardHistory.length - 1;
+    final currentEntry = !isLiveView && _viewingPly >= 0 && _viewingPly < _boardHistory.length
+        ? _boardHistory[_viewingPly]
+        : null;
+
+    final displayFen = currentEntry != null ? currentEntry['fen'] as String : _liveFen;
+    final displayLastMove = currentEntry != null ? currentEntry['lastMove'] as LastMoveInfo? : _liveLastMove;
+    final displayTurn = currentEntry != null ? currentEntry['turn'] as PieceColor : _liveTurn;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.surfaceCard,
+        elevation: 0,
         shape: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.surfacePanel,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const AppIcon(name: 'swords', size: 16, color: AppColors.textPrimary),
-            ),
-            const SizedBox(width: 10),
+            const AppIcon(name: 'smart_toy', size: 18, color: AppColors.textPrimary),
+            const SizedBox(width: 8),
             Text(
-              'VS Stockfish Bot (Lvl $_botLevel)',
+              'Bot Match (Level $_botLevel)',
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: AppColors.textPrimary,
               ),
@@ -252,18 +360,25 @@ class _BotGameScreenState extends State<BotGameScreen> {
         ),
         actions: [
           IconButton(
-            icon: const AppIcon(name: 'rotate-cw', size: 18, color: AppColors.textMuted),
-            onPressed: _resetGame,
+            icon: const AppIcon(name: 'rotate-ccw', size: 16, color: AppColors.textMuted),
             tooltip: 'Restart Match',
+            onPressed: _resetGame,
+          ),
+          IconButton(
+            icon: const AppIcon(name: 'flag', size: 16, color: AppColors.red),
+            tooltip: 'Resign',
+            onPressed: () {
+              _finishGame('You resigned the match.', winner: 'black');
+            },
           ),
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // Opponent Header Card
+            // Bot Opponent Header Card
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
@@ -299,10 +414,10 @@ class _BotGameScreenState extends State<BotGameScreen> {
                             ),
                           ),
                           Text(
-                            _turn != _playerColor ? 'Calculating optimal reply...' : 'Waiting for move...',
+                            _liveTurn != _playerColor ? 'Calculating optimal reply...' : 'Waiting for your move...',
                             style: TextStyle(
                               fontSize: 12,
-                              color: _turn != _playerColor ? AppColors.amber : AppColors.textMuted,
+                              color: _liveTurn != _playerColor ? AppColors.textPrimary : AppColors.textMuted,
                             ),
                           ),
                         ],
@@ -313,27 +428,146 @@ class _BotGameScreenState extends State<BotGameScreen> {
               ),
             ),
 
-            // Chess Board
+            // Chess Board (Natural board view)
             Expanded(
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: ChessBoardWidget(
-                    fen: _fen,
+                    fen: displayFen,
                     orientation: _playerColor,
-                    turn: _turn,
+                    turn: displayTurn,
                     playerColor: _playerColor,
-                    lastMove: _lastMove,
-                    interactive: !_isGameOver && _turn == _playerColor,
+                    lastMove: displayLastMove,
+                    interactive: isLiveView && !_isGameOver && _liveTurn == _playerColor,
                     onMove: _onPlayerMove,
                   ),
                 ),
               ),
             ),
 
+            // Move History & Live Snapper Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Navigation Buttons
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const AppIcon(name: 'chevrons-left', size: 16, color: AppColors.textPrimary),
+                          onPressed: _boardHistory.length <= 1 || _viewingPly == 0 ? null : _goToFirst,
+                          tooltip: 'Start of Game',
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(6),
+                            minimumSize: const Size(32, 32),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const AppIcon(name: 'chevron-left', size: 16, color: AppColors.textPrimary),
+                          onPressed: _boardHistory.length <= 1 || _viewingPly == 0 ? null : _goToPrevious,
+                          tooltip: 'Previous Move',
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(6),
+                            minimumSize: const Size(32, 32),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const AppIcon(name: 'chevron-right', size: 16, color: AppColors.textPrimary),
+                          onPressed: _boardHistory.length <= 1 || isLiveView ? null : _goToNext,
+                          tooltip: 'Next Move',
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(6),
+                            minimumSize: const Size(32, 32),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const AppIcon(name: 'chevrons-right', size: 16, color: AppColors.textPrimary),
+                          onPressed: _boardHistory.length <= 1 || isLiveView ? null : _goToLive,
+                          tooltip: 'Jump to Live',
+                          style: IconButton.styleFrom(
+                            padding: const EdgeInsets.all(6),
+                            minimumSize: const Size(32, 32),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Status Indicator
+                    if (isLiveView)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.green.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppColors.green.withValues(alpha: 0.4)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '● LIVE',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.green,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      GestureDetector(
+                        onTap: _goToLive,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfacePanel,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Ply $_viewingPly / ${_boardHistory.length - 1}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '• Tap for Live',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
             // Player Header Card
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
@@ -341,41 +575,22 @@ class _BotGameScreenState extends State<BotGameScreen> {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppColors.border),
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: AppColors.surfacePanel,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: const Center(
-                        child: AppIcon(name: 'user', size: 20, color: AppColors.textPrimary),
-                      ),
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.white,
+                      child: Text('W', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'You (White)',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                              fontSize: 14,
-                            ),
-                          ),
-                          Text(
-                            _turn == _playerColor ? 'Your turn to move' : 'Waiting for opponent...',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _turn == _playerColor ? AppColors.textPrimary : AppColors.textMuted,
-                            ),
-                          ),
-                        ],
+                      child: Text(
+                        'You (White)',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ],
